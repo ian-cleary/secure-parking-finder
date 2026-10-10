@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ParkSafe — Find Secure Parking by Location</title>
+<style>
+:root{
+  --ink:#2b3a42; --mist:#eef2f3; --pine:#3d5a45; --amber:#c98a2d; --red:#b3402e; --green:#4a7c59;
+  --script:'Yellowtail',cursive; --slab:'Zilla Slab',serif; --cond:'Oswald',sans-serif;
+}
+@import url('https://fonts.googleapis.com/css2?family=Yellowtail&family=Zilla+Slab:wght@500;600;700&family=Oswald:wght@400;500;600&display=swap');
+*{box-sizing:border-box; margin:0; padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--mist); color:var(--ink); line-height:1.5;}
+.hero{background:linear-gradient(180deg,#2b3a42 0%,#3d5a45 100%); color:#fff; text-align:center; padding:3rem 1rem 2.5rem;}
+.hero .wordmark{font-family:var(--script); font-size:3rem; color:#f4e8c1; text-shadow:0 2px 8px rgba(0,0,0,.3);}
+.hero h1{font-family:var(--slab); font-size:1.4rem; font-weight:600; margin:.5rem 0;}
+.hero p{font-family:var(--cond); text-transform:uppercase; letter-spacing:2px; font-size:.85rem; opacity:.85;}
+.search{background:#fff; max-width:720px; margin:-1.5rem auto 0; border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,.12); padding:1.5rem; position:relative; z-index:2;}
+.search label{font-family:var(--cond); text-transform:uppercase; letter-spacing:1px; font-size:.8rem; display:block; margin:.8rem 0 .3rem;}
+.search input[type=text], .search select{width:100%; padding:.7rem; border:2px solid #d5dde0; border-radius:8px; font-size:1rem;}
+.search input:focus, .search select:focus{outline:none; border-color:var(--pine);}
+.btn{display:inline-block; background:var(--pine); color:#fff; font-family:var(--cond); text-transform:uppercase; letter-spacing:1.5px; padding:.8rem 2rem; border:none; border-radius:8px; font-size:1rem; cursor:pointer; margin-top:1rem;}
+.btn:hover{background:#2f4636;}
+.btn:disabled{opacity:.5; cursor:wait;}
+#results{max-width:720px; margin:1.5rem auto; padding:0 1rem;}
+.traffic{border-radius:12px; padding:1.2rem; margin-bottom:1rem; display:flex; align-items:center; gap:1rem;}
+.traffic.green{background:#e6f2e8; border:2px solid var(--green);}
+.traffic.amber{background:#fdf3e0; border:2px solid var(--amber);}
+.traffic.red{background:#fbe9e5; border:2px solid var(--red);}
+.traffic.grey{background:#eef2f3; border:2px solid #9aa5ab;}
+.light{width:48px; height:48px; border-radius:50%; flex-shrink:0;}
+.light.green{background:var(--green); box-shadow:0 0 12px rgba(74,124,89,.5);}
+.light.amber{background:var(--amber); box-shadow:0 0 12px rgba(201,138,45,.5);}
+.light.red{background:var(--red); box-shadow:0 0 12px rgba(179,64,46,.5);}
+.light.grey{background:#9aa5ab;}
+.traffic h3{font-family:var(--slab); font-size:1.1rem; margin-bottom:.2rem;}
+.traffic p{font-size:.9rem;}
+.card{background:#fff; border-radius:12px; padding:1.2rem; margin-bottom:1rem; box-shadow:0 2px 8px rgba(0,0,0,.08);}
+.card h3{font-family:var(--slab); font-size:1.15rem; margin-bottom:.3rem;}
+.card .meta{font-family:var(--cond); text-transform:uppercase; letter-spacing:1px; font-size:.75rem; color:#6b7a82; margin-bottom:.5rem;}
+.card .secure{display:inline-block; font-family:var(--cond); font-size:.75rem; text-transform:uppercase; letter-spacing:1px; padding:.2rem .6rem; border-radius:20px; margin:.2rem .2rem .2rem 0;}
+.secure.yes{background:#e6f2e8; color:var(--green);}
+.secure.no{background:#fbe9e5; color:var(--red);}
+.secure.maybe{background:#fdf3e0; color:#8a6d1d;}
+.card p{font-size:.92rem; margin:.4rem 0;}
+.card a{color:var(--pine); font-weight:600;}
+.loading{text-align:center; padding:2rem; font-family:var(--cond); letter-spacing:1px; color:#6b7a82;}
+footer{text-align:center; padding:2rem 1rem; font-size:.85rem; color:#6b7a82;}
+footer a{color:var(--pine);}
+.chip{display:inline-block; font-family:var(--cond); text-transform:uppercase; letter-spacing:1px; font-size:.75rem; padding:.3rem .8rem; border:2px solid var(--pine); border-radius:20px; margin:.2rem; cursor:pointer; background:#fff;}
+.chip.on{background:var(--pine); color:#fff;}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wordmark">ParkSafe</div>
+  <h1>Find secure parking, know the risk</h1>
+  <p>UK &amp; Europe &middot; Vehicle theft traffic lights</p>
+</div>
+
+<div class="search">
+  <label for="addr">Street address</label>
+  <input type="text" id="addr" placeholder="e.g. 10 Downing Street, London" autocomplete="off">
+  <label>Vehicle type</label>
+  <div id="vtype">
+    <span class="chip on" data-v="car">Car</span>
+    <span class="chip" data-v="classic">Classic car</span>
+    <span class="chip" data-v="motorcycle">Motorcycle</span>
+    <span class="chip" data-v="motorhome">Motorhome / Campervan</span>
+    <span class="chip" data-v="van">Van</span>
+  </div>
+  <button class="btn" id="go">Find secure parking</button>
+</div>
+
+<div id="results"></div>
+
+<footer>
+  Theft data: <a href="https://data.police.uk/">police.uk</a> (UK, street-level vehicle crime) &middot;
+  Parking data: <a href="https://www.openstreetmap.org/">OpenStreetMap</a> &middot;
+  <a href="mailto:ian.cleary@gmail.com?subject=Bug%20report%3A%20ParkSafe">Report a bug 🐞</a>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+let vehicleType = 'car';
+
+document.querySelectorAll('#vtype .chip').forEach(c => {
+  c.onclick = () => {
+    document.querySelectorAll('#vtype .chip').forEach(x => x.classList.remove('on'));
+    c.classList.add('on');
+    vehicleType = c.dataset.v;
+  };
+});
+
+$('#go').onclick = async () => {
+  const addr = $('#addr').value.trim();
+  if (!addr) { alert('Enter a street address first.'); return; }
+  const btn = $('#go');
+  btn.disabled = true;
+  btn.textContent = 'Searching…';
+  $('#results').innerHTML = '<div class="loading">Locating address…</div>';
+
+  try {
+    // 1. Geocode via Nominatim
+    const geo = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(addr)}`, {
+      headers: {'Accept': 'application/json'}
+    }).then(r => r.json());
+
+    if (!geo.length) throw new Error('Address not found. Try a more specific address.');
+    const {lat, lon, display_name} = geo[0];
+    const country = geo[0].address?.country_code?.toUpperCase() || '';
+
+    $('#results').innerHTML = '<div class="loading">Checking theft risk &amp; nearby parking…</div>';
+
+    // 2. Theft risk (UK via police.uk, else fallback)
+    let risk = null;
+    if (country === 'GB') {
+      risk = await getUKRisk(lat, lon);
+    } else {
+      risk = {level: 'grey', title: 'Theft data unavailable', detail: 'Street-level vehicle crime data is only available for the UK. Exercise normal caution.'};
+    }
+
+    // 3. Find parking via Overpass
+    const parking = await findParking(lat, lon, vehicleType);
+
+    renderResults(display_name, risk, parking, vehicleType, country);
+
+  } catch (e) {
+    $('#results').innerHTML = `<div class="card"><h3>Something went wrong</h3><p>${e.message}</p></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Find secure parking';
+  }
+};
+
+async function getUKRisk(lat, lon) {
+  // Get last 3 months of vehicle crime data
+  const now = new Date();
+  const months = [];
+  for (let i = 1; i <= 3; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+  let total = 0;
+  for (const m of months) {
+    try {
+      const crimes = await fetch(`https://data.police.uk/api/crimes-street/vehicle-crime?lat=${lat}&lng=${lon}&date=${m}`).then(r => r.json());
+      total += crimes.length;
+    } catch(e) {}
+  }
+  // Traffic light thresholds (3-month count within ~1 mile)
+  if (total <= 5) return {level: 'green', title: 'Low vehicle theft risk', detail: `${total} vehicle crimes reported nearby in the last 3 months. This area looks safe.`};
+  if (total <= 20) return {level: 'amber', title: 'Moderate vehicle theft risk', detail: `${total} vehicle crimes reported nearby in the last 3 months. Choose secure parking and take precautions.`};
+  return {level: 'red', title: 'High vehicle theft risk', detail: `${total} vehicle crimes reported nearby in the last 3 months. Vehicle theft is rife here — use only the most secure parking.`};
+}
+
+async function findParking(lat, lon, vtype) {
+  // Overpass query for parking near location
+  let filter = '[amenity=parking]';
+  if (vtype === 'motorcycle') filter = '[amenity=motorcycle_parking]';
+
+  const query = `[out:json][timeout:25];(node(around:2000,${lat},${lon})${filter};way(around:2000,${lat},${lon})${filter};);out center 30;`;
+
+  try {
+    const data = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: 'data=' + encodeURIComponent(query),
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'}
+    }).then(r => r.json());
+
+    return (data.elements || []).map(el => {
+      const t = el.tags || {};
+      const plat = el.lat || el.center?.lat;
+      const plon = el.lon || el.center?.lon;
+      const dist = plat ? Math.round(haversine(lat, lon, plat, plon) * 1000) : null;
+
+      // Security scoring from OSM tags
+      const secure = [];
+      if (t.covered === 'yes') secure.push('Covered');
+      if (t.lit === 'yes') secure.push('Lit');
+      if (t.access === 'private') secure.push('Private');
+      if (t.fee === 'yes') secure.push('Paid (usually supervised)');
+      if (t.surveillance === 'yes' || t['surveillance:type'] === 'camera') secure.push('CCTV');
+      if (t.supervised === 'yes') secure.push('Supervised');
+
+      return {
+        name: t.name || 'Unnamed parking',
+        dist,
+        secure,
+        fee: t.fee,
+        covered: t.covered,
+        lat: plat, lon: plon
+      };
+    }).filter(p => p.lat).sort((a,b) => (a.dist||99999) - (b.dist||99999)).slice(0, 10);
+
+  } catch(e) {
+    return [];
+  }
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function renderResults(addr, risk, parking, vtype, country) {
+  let html = `<div class="traffic ${risk.level}"><div class="light ${risk.level}"></div><div><h3>${risk.title}</h3><p>${risk.detail}</p></div></div>`;
+
+  html += `<div class="card"><h3>📍 ${addr}</h3><p class="meta">Vehicle: ${vtype} &middot; ${country || 'Unknown country'}</p></div>`;
+
+  if (!parking.length) {
+    html += `<div class="card"><h3>No parking found nearby</h3><p>Try a more central address, or check <a href="https://www.parkopedia.com/">Parkopedia</a> and <a href="https://www.justpark.com/">JustPark</a> directly.</p></div>`;
+  } else {
+    html += `<h3 style="font-family:var(--slab); margin:1rem 0 .5rem;">Nearest parking</h3>`;
+    parking.forEach(p => {
+      const secHtml = p.secure.length
+        ? p.secure.map(s => `<span class="secure yes">${s}</span>`).join('')
+        : '<span class="secure maybe">Security unknown</span>';
+      const mapLink = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`;
+      html += `<div class="card"><h3>${p.name}</h3><p class="meta">${p.dist ? p.dist + 'm away' : 'Distance unknown'}</p><div>${secHtml}</div><p><a href="${mapLink}" target="_blank">Get directions →</a></p></div>`;
+    });
+  }
+
+  // Vehicle-specific advice
+  const advice = {
+    motorcycle: 'Look for dedicated motorcycle bays with ground anchors. Use a disc lock + chain even in "secure" car parks.',
+    classic: 'Classics are prime targets. Prefer covered, CCTV-monitored parking. Never leave it in an unlit street bay overnight.',
+    motorhome: 'Check height barriers and bay sizes before committing. Many city car parks exclude vehicles over 2m.',
+    van: 'Vans are frequently targeted for tool theft. Back into the bay against a wall where possible.',
+    car: 'Standard advice: lock, hide valuables, park in well-lit areas.'
+  };
+  html += `<div class="card"><h3>💡 ${vtype.charAt(0).toUpperCase()+vtype.slice(1)} tips</h3><p>${advice[vtype]||advice.car}</p></div>`;
+
+  $('#results').innerHTML = html;
+}
+</script>
+</body>
+</html>
