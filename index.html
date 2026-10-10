@@ -123,7 +123,7 @@ $('#locBtn').onclick = () => {
   navigator.geolocation.getCurrentPosition(async (pos) => {
     const {latitude, longitude} = pos.coords;
     try {
-      const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+      const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&lat=${latitude}&lon=${longitude}`, {
         headers: {'Accept': 'application/json'}
       }).then(r => r.json());
       $('#addr').value = rev.display_name || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
@@ -154,13 +154,13 @@ $('#go').onclick = async () => {
     const coordMatch = addr.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
     if (coordMatch) {
       lat = parseFloat(coordMatch[1]); lon = parseFloat(coordMatch[2]);
-      const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`, {
+      const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&lat=${lat}&lon=${lon}`, {
         headers: {'Accept': 'application/json'}
       }).then(r => r.json()).catch(() => null);
       display_name = rev?.display_name || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
       country = rev?.address?.country_code?.toUpperCase() || '';
     } else {
-      const geo = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(addr)}`, {
+      const geo = await fetch(`https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(addr)}`, {
         headers: {'Accept': 'application/json'}
       }).then(r => r.json());
       if (!geo.length) throw new Error('Address not found. Try a more specific address.');
