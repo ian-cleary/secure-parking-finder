@@ -395,7 +395,7 @@ async function findParking(lat, lon, vtype) {
     }
   }));
 
-  return merged.sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999))).slice(0, 10);
+  return merged.sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999))).slice(0, 15);
 }
 
 async function fetchGoogleParking(lat, lon) {
@@ -457,6 +457,8 @@ async function fetchOSMParking(lat, lon, vtype) {
       if (t.covered === 'yes') { secure.push('Covered'); score += 1; }
       if (t.fenced === 'yes') { secure.push('Fenced'); score += 1; }
       if (vtype === 'motorhome' && t.motorhome_stopover === 'yes') { secure.push('Motorhome stopover'); score += 2; }
+      // Named spots (real car parks, not generic bays) get a base score so they survive the merge
+      if (t.name) { score += 2; const op = operatorFromName(t.name); if (op) { secure.push(op + ' operated'); score += 2; } }
 
       // Build a useful label when OSM has no name (street added later via enrichLabels)
       let label = t.name;
@@ -525,8 +527,8 @@ function renderResults(addr, risk, parking, hotels, watchout, vtype, country) {
     html += `<div class="card toppick"><h3>${topPick.name}</h3>${topPick.address ? `<p class="meta" style="margin-top:-.3rem;">${topPick.address}</p>` : ''}<p class="meta"><b>${distLabel(topPick.dist)}</b> &middot; <span class="tag ${conf[0]}">${conf[1]}</span></p><div>${topPick.secure.map(s => `<span class="tag yes">${s}</span>`).join('') || '<span class="tag maybe">Security unmapped</span>'}</div>${parkDetails(topPick, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${topPick.lat},${topPick.lon}" target="_blank">Directions &rarr;</a> &middot; ${reviewLink(topPick)}</p></div>`;
 
     if (parking.length > 1) {
-      html += `<div class="sec-h">Other options</div>`;
-      parking.slice(1).forEach(p => {
+      html += `<div class="sec-h">Other options <span style="font-weight:normal; font-size:.8rem;">(nearest first)</span></div>`;
+      [...parking.slice(1)].sort((a,b) => (a.dist||99999) - (b.dist||99999)).forEach(p => {
         const c = p.score >= 5 ? ['yes','High'] : p.score >= 2 ? ['maybe','Reasonable'] : ['no','Basic'];
         html += `<div class="card"><h3>${p.name}</h3>${p.address ? `<p class="meta" style="margin-top:-.3rem;">${p.address}</p>` : ''}<p class="meta"><b>${distLabel(p.dist)}</b> &middot; <span class="tag ${c[0]}">${c[1]}</span></p><div>${p.secure.map(s => `<span class="tag yes">${s}</span>`).join('') || '<span class="tag maybe">Security unknown</span>'}</div>${parkDetails(p, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank">Directions &rarr;</a> &middot; ${reviewLink(p)}</p></div>`;
       });
