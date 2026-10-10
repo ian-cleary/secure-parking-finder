@@ -535,9 +535,10 @@ async function fetchOSMParking(lat, lon, vtype) {
         operator: t.operator || null,
         fee: t.fee,
         lat: plat, lon: plon,
-        source: 'osm'
+        source: 'osm',
+        _access: t.access || ''
       };
-    }).filter(p => p.lat).sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999)));
+    }).filter(p => p.lat && p._access !== 'private' && p._access !== 'no').sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999)));
 
     return spots;
 
