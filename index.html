@@ -126,7 +126,7 @@ $('#locBtn').onclick = () => {
   b.textContent = 'Locating…';
   b.style.pointerEvents = 'none';
   navigator.geolocation.getCurrentPosition(async (pos) => {
-    const {latitude, longitude} = pos.coords;
+    const {latitude, longitude, accuracy} = pos.coords;
     try {
       const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&lat=${latitude}&lon=${longitude}`, {
         headers: {'Accept': 'application/json'}
@@ -135,6 +135,13 @@ $('#locBtn').onclick = () => {
     } catch(e) {
       $('#addr').value = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
     }
+    // Warn if the fix is coarse (e.g. Wi-Fi/IP fallback rather than GPS)
+    if (accuracy && accuracy > 150) {
+      $('#addr').value += ` — ⚠ location accurate to ~${Math.round(accuracy)}m only`;
+    }
+    // Store exact coords so the search uses them, not a re-geocode of the address text
+    $('#addr').dataset.lat = latitude;
+    $('#addr').dataset.lon = longitude;
     b.innerHTML = '&#9678; Detect my location';
     b.style.pointerEvents = '';
     $('#go').click();
@@ -142,7 +149,7 @@ $('#locBtn').onclick = () => {
     b.innerHTML = '&#9678; Detect my location';
     b.style.pointerEvents = '';
     alert('Could not get your location. Please enter an address manually.');
-  }, {timeout: 10000});
+  }, {enableHighAccuracy: true, maximumAge: 0, timeout: 20000});
 };
 
 // Address autocomplete (debounced, via worker)
@@ -150,6 +157,7 @@ let acTimer = null;
 $('#addr').addEventListener('input', () => {
   clearTimeout(acTimer);
   $('#addr').dataset.placeId = ''; // typed manually — don't use a stale place ID
+  delete $('#addr').dataset.lat; delete $('#addr').dataset.lon;
   const q = $('#addr').value.trim();
   const box = $('#suggest');
   if (q.length < 3) { box.style.display = 'none'; return; }
@@ -218,7 +226,21 @@ $('#go').onclick = async () => {
   try {
     // 1. Geocode — or use raw coordinates if that's what's entered
     let lat, lon, display_name, country;
-    const coordMatch = addr.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+    // Exact GPS coords from "Detect my location" take priority (no re-geocode drift)
+    const gpsLat = parseFloat($('#addr').dataset.lat), gpsLon = parseFloat($('#addr').dataset.lon);
+    if (!isNaN(gpsLat) && !isNaN(gpsLon)) {
+      lat = gpsLat; lon = gpsLon;
+      display_name = addr.replace(/ — ⚠.*$/, '');
+      try {
+        const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&lat=${lat}&lon=${lon}`, {
+          headers: {'Accept': 'application/json'}
+        }).then(r => r.json()).catch(() => null);
+        country = rev?.address?.country_code?.toUpperCase() || '';
+      } catch(e) { country = ''; }
+      // Clear so a later manual edit doesn't reuse stale coords
+      delete $('#addr').dataset.lat; delete $('#addr').dataset.lon;
+    }
+    const coordMatch = !lat && addr.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
     if (coordMatch) {
       lat = parseFloat(coordMatch[1]); lon = parseFloat(coordMatch[2]);
       const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&lat=${lat}&lon=${lon}`, {
