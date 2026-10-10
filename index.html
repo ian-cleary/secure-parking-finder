@@ -149,6 +149,7 @@ $('#locBtn').onclick = () => {
 let acTimer = null;
 $('#addr').addEventListener('input', () => {
   clearTimeout(acTimer);
+  $('#addr').dataset.placeId = ''; // typed manually — don't use a stale place ID
   const q = $('#addr').value.trim();
   const box = $('#suggest');
   if (q.length < 3) { box.style.display = 'none'; return; }
@@ -160,7 +161,11 @@ $('#addr').addEventListener('input', () => {
       box.innerHTML = sug.map((s, i) => `<div data-i="${i}" style="padding:.5rem .75rem; cursor:pointer; border-bottom:1px solid #e8e0cf; font-size:.9rem;">${s.text}</div>`).join('');
       box.style.display = 'block';
       box.querySelectorAll('div').forEach(d => {
-        d.onclick = () => { $('#addr').value = sug[+d.dataset.i].text; box.style.display = 'none'; };
+        d.onclick = () => {
+          $('#addr').value = sug[+d.dataset.i].text;
+          $('#addr').dataset.placeId = sug[+d.dataset.i].placeId || '';
+          box.style.display = 'none';
+        };
         d.onmouseenter = () => d.style.background = '#f5f1e8';
         d.onmouseleave = () => d.style.background = '';
       });
@@ -222,10 +227,20 @@ $('#go').onclick = async () => {
       display_name = rev?.display_name || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
       country = rev?.address?.country_code?.toUpperCase() || '';
     } else {
-      const geo = await geocodeTolerant(addr);
-      ({lat, lon, display_name} = geo);
-      lat = parseFloat(lat); lon = parseFloat(lon);
-      country = geo.country_code;
+      // If picked from autocomplete, geocode via Google place ID (exact, skips Nominatim)
+      const pid = $('#addr').dataset.placeId;
+      if (pid) {
+        const pl = await fetch(`${PLACES_WORKER}/api/place-location?place_id=${encodeURIComponent(pid)}`).then(r => r.json());
+        if (pl.ok) {
+          lat = pl.lat; lon = pl.lng; display_name = pl.display_name; country = pl.country_code;
+        }
+      }
+      if (lat === undefined) {
+        const geo = await geocodeTolerant(addr);
+        ({lat, lon, display_name} = geo);
+        lat = parseFloat(lat); lon = parseFloat(lon);
+        country = geo.country_code;
+      }
     }
 
     $('#results').innerHTML = '<div class="loading">Checking theft risk &amp; nearby parking…</div>';
