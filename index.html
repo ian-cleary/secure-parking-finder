@@ -646,12 +646,35 @@ function reviewLink(p) {
   return `<a href="${url}" target="_blank">&#9733; Reviews</a>`;
 }
 
+function operatorLinks(p) {
+  // Deep links to operator booking / pricing / live availability — free, no API cost
+  const op = (p.operator || '').toLowerCase();
+  const q = encodeURIComponent(p.name || 'car park');
+  const links = [];
+  if (op.includes('q-park') || op.includes('qpark')) {
+    links.push(`<a href="https://www.q-park.co.uk/en-gb/search/?q=${q}" target="_blank">Book &amp; prices</a>`);
+  } else if (op.includes('ncp')) {
+    links.push(`<a href="https://www.ncp.co.uk/find-a-car-park/?search=${q}" target="_blank">Book &amp; prices</a>`);
+  } else if (op.includes('apcoa')) {
+    links.push(`<a href="https://www.apcoa.co.uk/search/?q=${q}" target="_blank">Book &amp; prices</a>`);
+  } else if (op.includes('indigo')) {
+    links.push(`<a href="https://en.parkindigo.com/" target="_blank">Book &amp; prices</a>`);
+  } else if (op.includes('britannia')) {
+    links.push(`<a href="https://www.q-park.co.uk/en-gb/search/?q=${q}" target="_blank">Book &amp; prices</a>`);
+  }
+  // Fallbacks for independents / unknowns
+  links.push(`<a href="https://www.parkopedia.co.uk/parking/${q}/" target="_blank">Prices</a>`);
+  links.push(`<a href="https://www.justpark.com/search/?q=${q}" target="_blank">Book a space</a>`);
+  return links.join(' &middot; ');
+}
+
 function parkDetails(p, vtype) {
   let d = '';
   if (p.operator) d += `<p style="font-size:.85rem;">Operated by <b>${p.operator}</b></p>`;
   if (p.opening) d += `<p style="font-size:.85rem;">Hours: ${p.opening}</p>`;
   if (p.maxheight) d += `<p style="font-size:.85rem;">Max height: ${p.maxheight}${(vtype==='motorhome'||vtype==='van') ? ' — <b>check your vehicle fits</b>' : ''}</p>`;
   if (p.capacity) d += `<p style="font-size:.85rem;">Capacity: ~${p.capacity} spaces</p>`;
+  d += `<p style="font-size:.85rem;">${operatorLinks(p)}</p>`;
   return d;
 }
 
