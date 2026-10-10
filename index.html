@@ -114,12 +114,14 @@ $('#go').onclick = async () => {
 
     $('#results').innerHTML = '<div class="loading">Checking theft risk &amp; nearby parking…</div>';
 
-    // 2. Theft risk (UK via police.uk, else fallback)
+    // 2. Theft risk (UK via police.uk, Europe via Eurostat, else fallback)
     let risk = null;
     if (country === 'GB') {
       risk = await getUKRisk(lat, lon);
+    } else if (['FR','DE','ES','IT','NL','BE','AT','CH','PT','IE','DK','SE','NO','FI','PL','CZ','HU','GR','HR','SI','SK','RO','LU'].includes(country)) {
+      risk = await getEurostatRisk(lat, lon, country);
     } else {
-      risk = {level: 'grey', title: 'Theft data unavailable', detail: 'Street-level vehicle crime data is only available for the UK. Exercise normal caution.'};
+      risk = {level: 'grey', title: 'Theft data unavailable', detail: 'Vehicle-theft statistics are not available for this country yet. Exercise normal caution.'};
     }
 
     // 3. Find parking via Overpass
@@ -156,6 +158,42 @@ async function getUKRisk(lat, lon) {
   return {level: 'red', title: 'High vehicle theft risk', detail: `${total} vehicle crimes reported nearby in the last 3 months. Vehicle theft is rife here — use only the most secure parking.`};
 }
 
+async function getEurostatRisk(lat, lon, country) {
+  try {
+    // Step 1: Find NUTS3 region via Overpass is_in
+    // NUTS3 = admin_level 6 in FR/DE/ES/IT, admin_level 5 in some others; try 6 then 5
+    let nutsCode = null;
+    for (const lvl of [6, 5]) {
+      const q = `[out:json][timeout:15];is_in(${lat},${lon})->.a;rel(pivot.a)[boundary=administrative][admin_level=${lvl}];out tags 5;`;
+      const data = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: 'data=' + encodeURIComponent(q),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'}
+      }).then(r => r.json());
+      const rel = (data.elements || []).find(e => e.tags && (e.tags['ref:nuts'] || e.tags['ref:EU:nuts']));
+      if (rel) {
+        nutsCode = (rel.tags['ref:nuts'] || rel.tags['ref:EU:nuts']).replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        break;
+      }
+    }
+    if (!nutsCode) throw new Error('NUTS region not found');
+
+    // Step 2: Query Eurostat for motor-vehicle theft per 100k (ICCS050211)
+    const url = `https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/crim_gen_reg?format=JSON&lang=en&freq=A&unit=P_HTHAB&iccs=ICCS050211&geo=${nutsCode}&time=2024`;
+    const es = await fetch(url).then(r => r.json());
+    const vals = Object.values(es.value || {});
+    if (!vals.length) throw new Error('No data');
+    const rate = vals[0]; // thefts per 100,000 inhabitants
+
+    // Traffic light from per-100k rate (calibrated: Paris ~189 = red)
+    if (rate < 50) return {level: 'green', title: 'Low vehicle theft risk', detail: `${Math.round(rate)} vehicle thefts per 100,000 people in this area (Eurostat 2024). This area looks safe.`};
+    if (rate < 140) return {level: 'amber', title: 'Moderate vehicle theft risk', detail: `${Math.round(rate)} vehicle thefts per 100,000 people in this area (Eurostat 2024). Choose secure parking and take precautions.`};
+    return {level: 'red', title: 'High vehicle theft risk', detail: `${Math.round(rate)} vehicle thefts per 100,000 people in this area (Eurostat 2024). Vehicle theft is rife here — use only the most secure parking.`};
+  } catch(e) {
+    return {level: 'grey', title: 'Theft data unavailable', detail: 'Could not retrieve European theft statistics for this location. Exercise normal caution.'};
+  }
+}
+
 async function findParking(lat, lon, vtype) {
   // Overpass query for parking near location
   let filter = '[amenity=parking]';
@@ -176,24 +214,30 @@ async function findParking(lat, lon, vtype) {
       const plon = el.lon || el.center?.lon;
       const dist = plat ? Math.round(haversine(lat, lon, plat, plon) * 1000) : null;
 
-      // Security scoring from OSM tags
+      // Security scoring from OSM tags (ranked by research)
       const secure = [];
-      if (t.covered === 'yes') secure.push('Covered');
-      if (t.lit === 'yes') secure.push('Lit');
-      if (t.access === 'private') secure.push('Private');
-      if (t.fee === 'yes') secure.push('Paid (usually supervised)');
-      if (t.surveillance === 'yes' || t['surveillance:type'] === 'camera') secure.push('CCTV');
-      if (t.supervised === 'yes') secure.push('Supervised');
+      let score = 0;
+      if (t.supervised === 'yes') { secure.push('Supervised'); score += 3; }
+      if (t.surveillance === 'yes' || t['surveillance:type'] === 'camera') { secure.push('CCTV'); score += 2; }
+      if (t.access === 'private' || t.access === 'permit' || t.access === 'customers') { secure.push('Restricted access'); score += 2; }
+      if (t.fee === 'yes') { secure.push('Paid'); score += 1; }
+      if (t.parking === 'multi-storey' || t.parking === 'underground') { secure.push('Enclosed'); score += 2; }
+      if (t.barrier === 'lift_gate' || t.barrier === 'gate') { secure.push('Barrier'); score += 1; }
+      if (t.lit === 'yes') { secure.push('Lit'); score += 1; }
+      if (t.covered === 'yes') { secure.push('Covered'); score += 1; }
+      if (t.fenced === 'yes') { secure.push('Fenced'); score += 1; }
+      if (vtype === 'motorhome' && t.motorhome_stopover === 'yes') { secure.push('Motorhome stopover'); score += 2; }
 
       return {
         name: t.name || 'Unnamed parking',
         dist,
         secure,
+        score,
         fee: t.fee,
         covered: t.covered,
         lat: plat, lon: plon
       };
-    }).filter(p => p.lat).sort((a,b) => (a.dist||99999) - (b.dist||99999)).slice(0, 10);
+    }).filter(p => p.lat).sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999))).slice(0, 10);
 
   } catch(e) {
     return [];
