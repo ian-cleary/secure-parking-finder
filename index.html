@@ -99,7 +99,7 @@ footer a{color:var(--blue); font-weight:600;}
 
 <footer>
   <b>PARKSAFE</b> &middot; Theft data: <a href="https://data.police.uk/">police.uk</a> (UK, street-level vehicle crime) &middot;
-  Parking data: <a href="https://www.openstreetmap.org/">OpenStreetMap</a> &middot;
+  Parking data: <a href="https://maps.google.com/">Google Places</a> &middot; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> &middot;
   <a href="mailto:ian.cleary@gmail.com?subject=Bug%20report%3A%20ParkSafe">Report a bug 🐞</a>
 </footer>
 
@@ -366,32 +366,61 @@ function scoreFromGoogle(p) {
 }
 
 async function findParking(lat, lon, vtype) {
-  // Try Google Places via worker first (real ratings, reviews, hours) — falls back to OSM
-  try {
-    const wRes = await fetch(`${PLACES_WORKER}/api/places?lat=${lat}&lng=${lon}`, {signal: AbortSignal.timeout(8000)}).then(r => r.json());
-    if (wRes.results && wRes.results.length) {
-      return wRes.results.map(p => ({
-        name: p.name,
-        address: p.address || null,
-        dist: Math.round(haversine(lat, lon, p.lat, p.lng) * 1000),
-        secure: inferSecurity(p.name, p.types),
-        score: scoreFromGoogle(p),
-        opening: p.open_now === true ? 'Open now' : p.open_now === false ? 'Closed now' : null,
-        maxheight: null,
-        capacity: null,
-        operator: operatorFromName(p.name),
-        fee: null,
-        lat: p.lat, lon: p.lng,
-        rating: p.rating,
-        reviews: p.reviews,
-        place_id: p.place_id,
-        source: 'google'
-      })).sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999))).slice(0, 10);
-    }
-  } catch(e) { /* fall through to OSM */ }
+  // Query Google Places AND OSM in parallel, merge, dedupe by proximity
+  const [googleResults, osmResults] = await Promise.all([
+    fetchGoogleParking(lat, lon).catch(() => []),
+    fetchOSMParking(lat, lon, vtype).catch(() => []),
+  ]);
 
-  // Overpass query — catch nodes, ways, relations, and building=parking (multi-storeys)
-  let filter, bfilter;
+  // Dedupe: if an OSM result is within 150m of a Google result, it's the same place — keep Google's
+  const merged = [...googleResults];
+  for (const osm of osmResults) {
+    const dup = merged.some(g => haversine(g.lat, g.lon, osm.lat, osm.lon) * 1000 < 150);
+    if (!dup) merged.push(osm);
+  }
+
+  // Enrich unnamed OSM spots with street names
+  const unnamed = merged.filter(p => p.needsStreet).slice(0, 10);
+  await Promise.all(unnamed.map(async (p) => {
+    try {
+      const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&zoom=16&lat=${p.lat}&lon=${p.lon}`, {
+        headers: {'Accept': 'application/json'}
+      }).then(r => r.json());
+      const a = rev.address || {};
+      const street = a.road || a.pedestrian || a.footway || a.cycleway || a.suburb || a.neighbourhood || a.hamlet || null;
+      if (street) p.name = `${p.baseType} — ${street}`;
+      else if (p.dist) p.name = `${p.baseType} (${p.dist < 1000 ? p.dist + 'm' : (p.dist/1000).toFixed(1) + 'km'} away)`;
+    } catch(e) {
+      if (p.dist) p.name = `${p.baseType} (${p.dist < 1000 ? p.dist + 'm' : (p.dist/1000).toFixed(1) + 'km'} away)`;
+    }
+  }));
+
+  return merged.sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999))).slice(0, 10);
+}
+
+async function fetchGoogleParking(lat, lon) {
+  const wRes = await fetch(`${PLACES_WORKER}/api/places?lat=${lat}&lng=${lon}`, {signal: AbortSignal.timeout(8000)}).then(r => r.json());
+  if (!wRes.results || !wRes.results.length) return [];
+  return wRes.results.map(p => ({
+    name: p.name,
+    address: p.address || null,
+    dist: Math.round(haversine(lat, lon, p.lat, p.lng) * 1000),
+    secure: inferSecurity(p.name, p.types),
+    score: scoreFromGoogle(p),
+    opening: p.open_now === true ? 'Open now' : p.open_now === false ? 'Closed now' : null,
+    maxheight: null,
+    capacity: null,
+    operator: operatorFromName(p.name),
+    fee: null,
+    lat: p.lat, lon: p.lng,
+    rating: p.rating,
+    reviews: p.reviews,
+    place_id: p.place_id,
+    source: 'google'
+  }));
+}
+
+async function fetchOSMParking(lat, lon, vtype) {
   if (vtype === 'motorcycle') {
     filter = '[amenity=motorcycle_parking]';
     bfilter = '[amenity=motorcycle_parking]';
@@ -455,27 +484,12 @@ async function findParking(lat, lon, vtype) {
         capacity: t.capacity || null,
         operator: t.operator || null,
         fee: t.fee,
-        lat: plat, lon: plon
+        lat: plat, lon: plon,
+        source: 'osm'
       };
     }).filter(p => p.lat).sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999)));
 
-    // Enrich unnamed spots with street names so they're distinguishable
-    const unnamed = spots.filter(p => p.needsStreet).slice(0, 10);
-    await Promise.all(unnamed.map(async (p) => {
-      try {
-        const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&zoom=16&lat=${p.lat}&lon=${p.lon}`, {
-          headers: {'Accept': 'application/json'}
-        }).then(r => r.json());
-        const a = rev.address || {};
-        const street = a.road || a.pedestrian || a.footway || a.cycleway || a.suburb || a.neighbourhood || a.hamlet || null;
-        if (street) p.name = `${p.baseType} — ${street}`;
-        else if (p.dist) p.name = `${p.baseType} (${p.dist < 1000 ? p.dist + 'm' : (p.dist/1000).toFixed(1) + 'km'} away)`;
-      } catch(e) {
-        if (p.dist) p.name = `${p.baseType} (${p.dist < 1000 ? p.dist + 'm' : (p.dist/1000).toFixed(1) + 'km'} away)`;
-      }
-    }));
-
-    return spots.slice(0, 10);
+    return spots;
 
   } catch(e) {
     return [];
@@ -504,7 +518,7 @@ function renderResults(addr, risk, parking, hotels, watchout, vtype, country) {
   html += `<div class="card"><h3><span class="dir-arrow">&rarr;</span>${addr}</h3><p class="meta">Vehicle: ${vlabel}</p></div>`;
 
   if (!parking.length) {
-    html += `<div class="card"><h3>No mapped parking within 3 km</h3><p>OpenStreetMap lists nothing here yet — but city-centre multi-storeys (Q-Park, NCP, Indigo) often aren't fully mapped. Check directly:</p><ul><li><a href="https://www.parkopedia.com/parking/${encodeURIComponent(addr.split(',')[0])}/">Parkopedia near ${addr.split(',')[0]}</a> — ratings &amp; bookable spaces</li><li><a href="https://www.justpark.com/">JustPark</a> — reviewed private spaces nearby</li><li><a href="https://www.q-park.co.uk/en-gb/cities/manchester/">Q-Park Manchester</a> / <a href="https://www.ncp.co.uk/">NCP</a> — operator sites with CCTV &amp; barriers</li></ul></div>`;
+    html += `<div class="card"><h3>No parking found within 3 km</h3><p>Neither Google nor OpenStreetMap lists parking here yet. Check directly:</p><ul><li><a href="https://www.parkopedia.com/parking/${encodeURIComponent(addr.split(',')[0])}/">Parkopedia near ${addr.split(',')[0]}</a> — ratings &amp; bookable spaces</li><li><a href="https://www.justpark.com/">JustPark</a> — reviewed private spaces nearby</li><li><a href="https://www.q-park.co.uk/en-gb/cities/manchester/">Q-Park Manchester</a> / <a href="https://www.ncp.co.uk/">NCP</a> — operator sites with CCTV &amp; barriers</li></ul></div>`;
   } else {
     const topPick = parking[0];
     const conf = topPick.score >= 5 ? ['yes','High confidence'] : topPick.score >= 2 ? ['maybe','Reasonable confidence'] : ['no','Basic — verify on arrival'];
