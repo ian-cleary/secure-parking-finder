@@ -349,7 +349,7 @@ async function findParking(lat, lon, vtype) {
       headers: {'Content-Type': 'application/x-www-form-urlencoded'}
     }).then(r => r.json());
 
-    return (data.elements || []).map(el => {
+    const spots = (data.elements || []).map(el => {
       const t = el.tags || {};
       const plat = el.lat || el.center?.lat;
       const plon = el.lon || el.center?.lon;
@@ -369,8 +369,9 @@ async function findParking(lat, lon, vtype) {
       if (t.fenced === 'yes') { secure.push('Fenced'); score += 1; }
       if (vtype === 'motorhome' && t.motorhome_stopover === 'yes') { secure.push('Motorhome stopover'); score += 2; }
 
-      // Build a useful label when OSM has no name
+      // Build a useful label when OSM has no name (street added later via enrichLabels)
       let label = t.name;
+      const needsStreet = !label;
       if (!label) {
         const ptype = t.parking === 'multi-storey' ? 'Multi-storey car park'
           : t.parking === 'underground' ? 'Underground car park'
@@ -380,11 +381,12 @@ async function findParking(lat, lon, vtype) {
           : vtype === 'motorcycle' ? 'Motorcycle parking'
           : 'Car park';
         label = t.operator ? `${t.operator} — ${ptype.toLowerCase()}` : ptype;
-        if (dist && dist < 1000) label += ` (${dist}m away)`;
       }
 
       return {
         name: label,
+        needsStreet,
+        baseType: needsStreet ? label : null,
         dist,
         secure,
         score,
@@ -395,7 +397,25 @@ async function findParking(lat, lon, vtype) {
         fee: t.fee,
         lat: plat, lon: plon
       };
-    }).filter(p => p.lat).sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999))).slice(0, 10);
+    }).filter(p => p.lat).sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999)));
+
+    // Enrich unnamed spots with street names so they're distinguishable
+    const unnamed = spots.filter(p => p.needsStreet).slice(0, 10);
+    await Promise.all(unnamed.map(async (p) => {
+      try {
+        const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&zoom=16&lat=${p.lat}&lon=${p.lon}`, {
+          headers: {'Accept': 'application/json'}
+        }).then(r => r.json());
+        const a = rev.address || {};
+        const street = a.road || a.pedestrian || a.footway || a.cycleway || a.suburb || a.neighbourhood || a.hamlet || null;
+        if (street) p.name = `${p.baseType} — ${street}`;
+        else if (p.dist) p.name = `${p.baseType} (${p.dist < 1000 ? p.dist + 'm' : (p.dist/1000).toFixed(1) + 'km'} away)`;
+      } catch(e) {
+        if (p.dist) p.name = `${p.baseType} (${p.dist < 1000 ? p.dist + 'm' : (p.dist/1000).toFixed(1) + 'km'} away)`;
+      }
+    }));
+
+    return spots.slice(0, 10);
 
   } catch(e) {
     return [];
