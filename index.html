@@ -223,9 +223,20 @@ async function getUKRisk(lat, lon) {
 }
 
 async function getEurostatRisk(lat, lon, country) {
+  const rateToRisk = (rate, scope) => {
+    if (rate < 50) return {level: 'green', title: 'Low vehicle theft risk', detail: `${Math.round(rate)} vehicle thefts per 100,000 people ${scope} (Eurostat 2024). This area looks safe.`};
+    if (rate < 140) return {level: 'amber', title: 'Moderate vehicle theft risk', detail: `${Math.round(rate)} vehicle thefts per 100,000 people ${scope} (Eurostat 2024). Choose secure parking and take precautions.`};
+    return {level: 'red', title: 'High vehicle theft risk', detail: `${Math.round(rate)} vehicle thefts per 100,000 people ${scope} (Eurostat 2024). Theft is rife here — use only the most secure parking.`};
+  };
+  const fetchRate = async (geo) => {
+    const url = `https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/crim_gen_reg?format=JSON&lang=en&freq=A&unit=P_HTHAB&iccs=ICCS050211&geo=${geo}&time=2024`;
+    const es = await fetch(url).then(r => r.json());
+    const vals = Object.values(es.value || {});
+    return vals.length ? vals[0] : null;
+  };
+
+  // Try NUTS3 regional rate first (via Overpass boundary lookup)
   try {
-    // Step 1: Find NUTS3 region via Overpass is_in
-    // NUTS3 = admin_level 6 in FR/DE/ES/IT, admin_level 5 in some others; try 6 then 5
     let nutsCode = null;
     for (const lvl of [6, 5]) {
       const q = `[out:json][timeout:15];is_in(${lat},${lon})->.a;rel(pivot.a)[boundary=administrative][admin_level=${lvl}];out tags 5;`;
@@ -235,27 +246,21 @@ async function getEurostatRisk(lat, lon, country) {
         headers: {'Content-Type': 'application/x-www-form-urlencoded'}
       }).then(r => r.json());
       const rel = (data.elements || []).find(e => e.tags && (e.tags['ref:nuts'] || e.tags['ref:EU:nuts']));
-      if (rel) {
-        nutsCode = (rel.tags['ref:nuts'] || rel.tags['ref:EU:nuts']).replace(/[^A-Z0-9]/gi, '').toUpperCase();
-        break;
-      }
+      if (rel) { nutsCode = (rel.tags['ref:nuts'] || rel.tags['ref:EU:nuts']).replace(/[^A-Z0-9]/gi, '').toUpperCase(); break; }
     }
-    if (!nutsCode) throw new Error('NUTS region not found');
+    if (nutsCode) {
+      const rate = await fetchRate(nutsCode);
+      if (rate !== null) return rateToRisk(rate, 'in this region');
+    }
+  } catch(e) { /* fall through to national */ }
 
-    // Step 2: Query Eurostat for motor-vehicle theft per 100k (ICCS050211)
-    const url = `https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/crim_gen_reg?format=JSON&lang=en&freq=A&unit=P_HTHAB&iccs=ICCS050211&geo=${nutsCode}&time=2024`;
-    const es = await fetch(url).then(r => r.json());
-    const vals = Object.values(es.value || {});
-    if (!vals.length) throw new Error('No data');
-    const rate = vals[0]; // thefts per 100,000 inhabitants
+  // Fallback: national rate (no Overpass needed)
+  try {
+    const rate = await fetchRate(country);
+    if (rate !== null) return rateToRisk(rate, 'nationally');
+  } catch(e) {}
 
-    // Traffic light from per-100k rate (calibrated: Paris ~189 = red)
-    if (rate < 50) return {level: 'green', title: 'Low vehicle theft risk', detail: `${Math.round(rate)} vehicle thefts per 100,000 people in this area (Eurostat 2024). This area looks safe.`};
-    if (rate < 140) return {level: 'amber', title: 'Moderate vehicle theft risk', detail: `${Math.round(rate)} vehicle thefts per 100,000 people in this area (Eurostat 2024). Choose secure parking and take precautions.`};
-    return {level: 'red', title: 'High vehicle theft risk', detail: `${Math.round(rate)} vehicle thefts per 100,000 people in this area (Eurostat 2024). Vehicle theft is rife here — use only the most secure parking.`};
-  } catch(e) {
-    return {level: 'grey', title: 'Theft data unavailable', detail: 'Could not retrieve European theft statistics for this location. Exercise normal caution.'};
-  }
+  return {level: 'grey', title: 'Theft data unavailable', detail: 'Could not retrieve European theft statistics for this location. Exercise normal caution.'};
 }
 
 async function findParking(lat, lon, vtype) {
