@@ -255,8 +255,22 @@ async function findParking(lat, lon, vtype) {
       if (t.fenced === 'yes') { secure.push('Fenced'); score += 1; }
       if (vtype === 'motorhome' && t.motorhome_stopover === 'yes') { secure.push('Motorhome stopover'); score += 2; }
 
+      // Build a useful label when OSM has no name
+      let label = t.name;
+      if (!label) {
+        const ptype = t.parking === 'multi-storey' ? 'Multi-storey car park'
+          : t.parking === 'underground' ? 'Underground car park'
+          : t.parking === 'surface' ? 'Surface car park'
+          : t.parking === 'street_side' ? 'On-street parking'
+          : t.parking === 'lane' ? 'Parking lane'
+          : vtype === 'motorcycle' ? 'Motorcycle parking'
+          : 'Car park';
+        label = t.operator ? `${t.operator} — ${ptype.toLowerCase()}` : ptype;
+        if (dist && dist < 1000) label += ` (${dist}m away)`;
+      }
+
       return {
-        name: t.name || 'Unnamed parking',
+        name: label,
         dist,
         secure,
         score,
