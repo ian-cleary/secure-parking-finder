@@ -138,24 +138,31 @@ $('#go').onclick = async () => {
 };
 
 async function getUKRisk(lat, lon) {
-  // Get last 3 months of vehicle crime data
+  // police.uk data lags ~2 months; find the latest month with data by trying back from last month
   const now = new Date();
-  const months = [];
-  for (let i = 1; i <= 3; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
-  }
-  let total = 0;
-  for (const m of months) {
+  let latest = null;
+  for (let back = 1; back <= 4; back++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - back, 1);
+    const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     try {
       const crimes = await fetch(`https://data.police.uk/api/crimes-street/vehicle-crime?lat=${lat}&lng=${lon}&date=${m}`).then(r => r.json());
-      total += crimes.length;
-    } catch(e) {}
+      if (crimes.length > 0 || back === 4) { latest = {month: m, count: crimes.length}; break; }
+      // 0 crimes might be genuine (rural) — verify with one more month before accepting
+      const d2 = new Date(now.getFullYear(), now.getMonth() - back - 1, 1);
+      const m2 = `${d2.getFullYear()}-${String(d2.getMonth()+1).padStart(2,'0')}`;
+      const c2 = await fetch(`https://data.police.uk/api/crimes-street/vehicle-crime?lat=${lat}&lng=${lon}&date=${m2}`).then(r => r.json());
+      latest = {month: m, count: crimes.length + c2.length, months: 2};
+      break;
+    } catch(e) { continue; }
   }
-  // Traffic light thresholds (3-month count within ~1 mile)
-  if (total <= 5) return {level: 'green', title: 'Low vehicle theft risk', detail: `${total} vehicle crimes reported nearby in the last 3 months. This area looks safe.`};
-  if (total <= 20) return {level: 'amber', title: 'Moderate vehicle theft risk', detail: `${total} vehicle crimes reported nearby in the last 3 months. Choose secure parking and take precautions.`};
-  return {level: 'red', title: 'High vehicle theft risk', detail: `${total} vehicle crimes reported nearby in the last 3 months. Vehicle theft is rife here — use only the most secure parking.`};
+  if (!latest) return {level: 'grey', title: 'Theft data unavailable', detail: 'Could not reach police.uk. Exercise normal caution.'};
+  const total = latest.count;
+  const label = latest.months ? `in ${latest.months} recent months` : `in ${latest.month}`;
+
+  // Traffic light thresholds (vehicle crimes within ~1 mile)
+  if (total <= 5) return {level: 'green', title: 'Low vehicle theft risk', detail: `${total} vehicle crimes reported nearby ${label}. This area looks safe — standard precautions are enough.`};
+  if (total <= 20) return {level: 'amber', title: 'Moderate vehicle theft risk', detail: `${total} vehicle crimes reported nearby ${label}. Pick a supervised or CCTV-covered car park and don't leave valuables visible.`};
+  return {level: 'red', title: 'High vehicle theft risk', detail: `${total} vehicle crimes reported nearby ${label}. Theft is rife here — use only supervised, barrier-controlled parking and consider a steering lock or tracker.`};
 }
 
 async function getEurostatRisk(lat, lon, country) {
@@ -233,8 +240,11 @@ async function findParking(lat, lon, vtype) {
         dist,
         secure,
         score,
+        opening: t.opening_hours || null,
+        maxheight: t.maxheight || null,
+        capacity: t.capacity || null,
+        operator: t.operator || null,
         fee: t.fee,
-        covered: t.covered,
         lat: plat, lon: plon
       };
     }).filter(p => p.lat).sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999))).slice(0, 10);
@@ -251,34 +261,57 @@ function haversine(lat1, lon1, lat2, lon2) {
 }
 
 function renderResults(addr, risk, parking, vtype, country) {
+  const vlabel = {car:'Car', classic:'Classic car', motorcycle:'Motorcycle', motorhome:'Motorhome / Campervan', van:'Van'}[vtype] || vtype;
   let html = `<div class="traffic ${risk.level}"><div class="light ${risk.level}"></div><div><h3>${risk.title}</h3><p>${risk.detail}</p></div></div>`;
 
-  html += `<div class="card"><h3>📍 ${addr}</h3><p class="meta">Vehicle: ${vtype} &middot; ${country || 'Unknown country'}</p></div>`;
+  html += `<div class="card"><h3>📍 ${addr}</h3><p class="meta">Parking for: ${vlabel}</p></div>`;
 
   if (!parking.length) {
-    html += `<div class="card"><h3>No parking found nearby</h3><p>Try a more central address, or check <a href="https://www.parkopedia.com/">Parkopedia</a> and <a href="https://www.justpark.com/">JustPark</a> directly.</p></div>`;
+    html += `<div class="card"><h3>No mapped parking found within 2km</h3><p>OpenStreetMap doesn't list parking here yet. Try these instead:</p><ul style="margin:.5rem 0 .5rem 1.2rem; font-size:.92rem;"><li><a href="https://www.parkopedia.com/">Parkopedia</a> — bookable spaces, often with CCTV ratings</li><li><a href="https://www.justpark.com/">JustPark</a> — driveways &amp; private spaces nearby</li><li><a href="https://en.parkindigo.com/">Indigo</a> / <a href="https://www.q-park.co.uk/">Q-Park</a> — multi-storeys with barriers &amp; CCTV</li></ul></div>`;
   } else {
-    html += `<h3 style="font-family:var(--slab); margin:1rem 0 .5rem;">Nearest parking</h3>`;
-    parking.forEach(p => {
-      const secHtml = p.secure.length
-        ? p.secure.map(s => `<span class="secure yes">${s}</span>`).join('')
-        : '<span class="secure maybe">Security unknown</span>';
-      const mapLink = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`;
-      html += `<div class="card"><h3>${p.name}</h3><p class="meta">${p.dist ? p.dist + 'm away' : 'Distance unknown'}</p><div>${secHtml}</div><p><a href="${mapLink}" target="_blank">Get directions →</a></p></div>`;
+    // Top pick: highest security score within 1.5km, else closest secure
+    const topPick = parking[0];
+    const confLabel = topPick.score >= 5 ? 'High confidence' : topPick.score >= 2 ? 'Reasonable confidence' : 'Basic — verify on arrival';
+    const confClass = topPick.score >= 5 ? 'yes' : topPick.score >= 2 ? 'maybe' : 'no';
+
+    html += `<div class="card" style="border:2px solid var(--pine);"><h3>⭐ Top pick: ${topPick.name}</h3><p class="meta">${topPick.dist ? (topPick.dist/1000).toFixed(1) + ' km away' : ''} &middot; <span class="secure ${confClass}">${confLabel}</span></p><div>${topPick.secure.map(s => `<span class="secure yes">${s}</span>`).join('') || '<span class="secure maybe">No security details mapped — check on arrival</span>'}</div>${parkDetails(topPick, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${topPick.lat},${topPick.lon}" target="_blank">Get directions →</a></p></div>`;
+
+    html += `<h3 style="font-family:var(--slab); margin:1.2rem 0 .5rem;">Other options nearby</h3>`;
+    parking.slice(1).forEach(p => {
+      const cl = p.score >= 5 ? 'yes' : p.score >= 2 ? 'maybe' : 'no';
+      const clt = p.score >= 5 ? 'High' : p.score >= 2 ? 'Reasonable' : 'Basic';
+      html += `<div class="card"><h3>${p.name}</h3><p class="meta">${p.dist ? (p.dist/1000).toFixed(1) + ' km' : ''} &middot; <span class="secure ${cl}">${clt} confidence</span></p><div>${p.secure.map(s => `<span class="secure yes">${s}</span>`).join('') || '<span class="secure maybe">Security unknown</span>'}</div>${parkDetails(p, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank">Get directions →</a></p></div>`;
     });
   }
 
-  // Vehicle-specific advice
-  const advice = {
-    motorcycle: 'Look for dedicated motorcycle bays with ground anchors. Use a disc lock + chain even in "secure" car parks.',
-    classic: 'Classics are prime targets. Prefer covered, CCTV-monitored parking. Never leave it in an unlit street bay overnight.',
-    motorhome: 'Check height barriers and bay sizes before committing. Many city car parks exclude vehicles over 2m.',
-    van: 'Vans are frequently targeted for tool theft. Back into the bay against a wall where possible.',
-    car: 'Standard advice: lock, hide valuables, park in well-lit areas.'
-  };
-  html += `<div class="card"><h3>💡 ${vtype.charAt(0).toUpperCase()+vtype.slice(1)} tips</h3><p>${advice[vtype]||advice.car}</p></div>`;
+  // Confidence checklist tailored to vehicle + risk
+  html += confidenceChecklist(vtype, risk.level);
 
   $('#results').innerHTML = html;
+}
+
+function parkDetails(p, vtype) {
+  let d = '';
+  if (p.operator) d += `<p style="font-size:.85rem;">Operated by <b>${p.operator}</b></p>`;
+  if (p.opening) d += `<p style="font-size:.85rem;">Hours: ${p.opening}</p>`;
+  if (p.maxheight) d += `<p style="font-size:.85rem;">Max height: ${p.maxheight}${(vtype==='motorhome'||vtype==='van') ? ' — <b>check your vehicle fits</b>' : ''}</p>`;
+  if (p.capacity) d += `<p style="font-size:.85rem;">Capacity: ~${p.capacity} spaces</p>`;
+  return d;
+}
+
+function confidenceChecklist(vtype, riskLevel) {
+  const items = {
+    car: ['Lock and take valuables with you', 'Park under a light or camera where possible', 'Note the bay number / level for later'],
+    classic: ['Use a steering-wheel lock — visible deterrent matters', 'Prefer supervised or CCTV-monitored sites only', 'Consider a tracker if leaving overnight', 'Photograph the car\'s condition on arrival'],
+    motorcycle: ['Chain to a ground anchor or immovable object', 'Disc lock on front wheel as minimum', 'Cover the bike — out of sight helps', 'Park near CCTV or staffed entrances'],
+    motorhome: ['Check height barrier before entering', 'Confirm overnight stays are allowed', 'Level the van and lock all external hatches', 'Don\'t leave awnings or valuables outside'],
+    van: ['Back into the bay against a wall if possible', 'Deadlock doors; consider a slam-lock', 'Remove tools or lock them in a bolted box', 'Park in view of cameras, not dark corners']
+  };
+  const list = (items[vtype] || items.car).map(i => `<li>${i}</li>`).join('');
+  const riskNote = riskLevel === 'red'
+    ? '<p style="margin-top:.5rem;"><b>This is a high-theft area.</b> A visible deterrent (lock, chain, tracker) is strongly advised even in supervised parking.</p>'
+    : riskLevel === 'amber' ? '<p style="margin-top:.5rem;">Moderate-theft area — the basics above go a long way here.</p>' : '';
+  return `<div class="card"><h3>✅ Park-with-confidence checklist</h3><ul style="margin:.5rem 0 .5rem 1.2rem; font-size:.92rem;">${list}</ul>${riskNote}</div>`;
 }
 </script>
 </body>
