@@ -5,79 +5,99 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ParkSafe — Find Secure Parking by Location</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Archivo+Black&display=swap');
 :root{
-  --ink:#2b3a42; --mist:#eef2f3; --pine:#3d5a45; --amber:#c98a2d; --red:#b3402e; --green:#4a7c59;
-  --script:'Yellowtail',cursive; --slab:'Zilla Slab',serif; --cond:'Oswald',sans-serif;
+  --paper:#FAF7F1; --ink:#1A1C19; --blue:#0B4EA2; --green:#007A3D;
+  --red:#D43A2A; --amber:#E39A1F; --ok:#2F7D4A; --grey:#8A8D86;
+  --disp:'Archivo Black',sans-serif; --body:'Archivo',sans-serif;
 }
-@import url('https://fonts.googleapis.com/css2?family=Yellowtail&family=Zilla+Slab:wght@500;600;700&family=Oswald:wght@400;500;600&display=swap');
 *{box-sizing:border-box; margin:0; padding:0;}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--mist); color:var(--ink); line-height:1.5;}
-.hero{background:linear-gradient(180deg,#2b3a42 0%,#3d5a45 100%); color:#fff; text-align:center; padding:3rem 1rem 2.5rem;}
-.hero .wordmark{font-family:var(--script); font-size:3rem; color:#f4e8c1; text-shadow:0 2px 8px rgba(0,0,0,.3);}
-.hero h1{font-family:var(--slab); font-size:1.4rem; font-weight:600; margin:.5rem 0;}
-.hero p{font-family:var(--cond); text-transform:uppercase; letter-spacing:2px; font-size:.85rem; opacity:.85;}
-.search{background:#fff; max-width:720px; margin:-1.5rem auto 0; border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,.12); padding:1.5rem; position:relative; z-index:2;}
-.search label{font-family:var(--cond); text-transform:uppercase; letter-spacing:1px; font-size:.8rem; display:block; margin:.8rem 0 .3rem;}
-.search input[type=text], .search select{width:100%; padding:.7rem; border:2px solid #d5dde0; border-radius:8px; font-size:1rem;}
-.search input:focus, .search select:focus{outline:none; border-color:var(--pine);}
-.btn{display:inline-block; background:var(--pine); color:#fff; font-family:var(--cond); text-transform:uppercase; letter-spacing:1.5px; padding:.8rem 2rem; border:none; border-radius:8px; font-size:1rem; cursor:pointer; margin-top:1rem;}
-.btn:hover{background:#2f4636;}
-.btn:disabled{opacity:.5; cursor:wait;}
-#results{max-width:720px; margin:1.5rem auto; padding:0 1rem;}
-.traffic{border-radius:12px; padding:1.2rem; margin-bottom:1rem; display:flex; align-items:center; gap:1rem;}
-.traffic.green{background:#e6f2e8; border:2px solid var(--green);}
-.traffic.amber{background:#fdf3e0; border:2px solid var(--amber);}
-.traffic.red{background:#fbe9e5; border:2px solid var(--red);}
-.traffic.grey{background:#eef2f3; border:2px solid #9aa5ab;}
-.light{width:48px; height:48px; border-radius:50%; flex-shrink:0;}
-.light.green{background:var(--green); box-shadow:0 0 12px rgba(74,124,89,.5);}
-.light.amber{background:var(--amber); box-shadow:0 0 12px rgba(201,138,45,.5);}
-.light.red{background:var(--red); box-shadow:0 0 12px rgba(179,64,46,.5);}
-.light.grey{background:#9aa5ab;}
-.traffic h3{font-family:var(--slab); font-size:1.1rem; margin-bottom:.2rem;}
-.traffic p{font-size:.9rem;}
-.card{background:#fff; border-radius:12px; padding:1.2rem; margin-bottom:1rem; box-shadow:0 2px 8px rgba(0,0,0,.08);}
-.card h3{font-family:var(--slab); font-size:1.15rem; margin-bottom:.3rem;}
-.card .meta{font-family:var(--cond); text-transform:uppercase; letter-spacing:1px; font-size:.75rem; color:#6b7a82; margin-bottom:.5rem;}
-.card .secure{display:inline-block; font-family:var(--cond); font-size:.75rem; text-transform:uppercase; letter-spacing:1px; padding:.2rem .6rem; border-radius:20px; margin:.2rem .2rem .2rem 0;}
-.secure.yes{background:#e6f2e8; color:var(--green);}
-.secure.no{background:#fbe9e5; color:var(--red);}
-.secure.maybe{background:#fdf3e0; color:#8a6d1d;}
-.card p{font-size:.92rem; margin:.4rem 0;}
-.card a{color:var(--pine); font-weight:600;}
-.loading{text-align:center; padding:2rem; font-family:var(--cond); letter-spacing:1px; color:#6b7a82;}
-footer{text-align:center; padding:2rem 1rem; font-size:.85rem; color:#6b7a82;}
-footer a{color:var(--pine);}
-.chip{display:inline-block; font-family:var(--cond); text-transform:uppercase; letter-spacing:1px; font-size:.75rem; padding:.3rem .8rem; border:2px solid var(--pine); border-radius:20px; margin:.2rem; cursor:pointer; background:#fff;}
-.chip.on{background:var(--pine); color:#fff;}
+body{font-family:var(--body); background:var(--paper); color:var(--ink); line-height:1.55; -webkit-font-smoothing:antialiased;}
+
+/* Masthead — motorway direction-sign panel */
+.mast{background:var(--blue); color:#fff; padding:2.2rem 1rem 1.8rem; border-bottom:6px solid var(--ink);}
+.mast-inner{max-width:760px; margin:0 auto; display:flex; align-items:center; gap:1.1rem;}
+.p-sign{width:64px; height:64px; background:var(--blue); border:4px solid #fff; border-radius:10px; display:flex; align-items:center; justify-content:center; font-family:var(--disp); font-size:2.2rem; color:#fff; flex-shrink:0; box-shadow:inset 0 0 0 2px var(--blue);}
+.mast h1{font-family:var(--disp); font-size:1.9rem; letter-spacing:.5px; line-height:1.1;}
+.mast .sub{font-size:.85rem; text-transform:uppercase; letter-spacing:3px; opacity:.9; margin-top:.3rem;}
+
+/* Search panel — clean Scandi card, strong border */
+.search{background:#fff; max-width:760px; margin:1.5rem auto 0; border:3px solid var(--ink); padding:1.4rem 1.4rem 1.2rem;}
+.search label{font-weight:700; text-transform:uppercase; letter-spacing:1.5px; font-size:.75rem; display:block; margin:.9rem 0 .35rem;}
+.search label:first-child{margin-top:0;}
+.search input[type=text]{width:100%; padding:.75rem .9rem; border:2px solid var(--ink); font-family:var(--body); font-size:1rem; background:var(--paper);}
+.search input:focus{outline:3px solid var(--blue); outline-offset:1px;}
+.chip{display:inline-block; font-weight:600; text-transform:uppercase; letter-spacing:1px; font-size:.75rem; padding:.45rem .9rem; border:2px solid var(--ink); margin:.25rem .25rem .25rem 0; cursor:pointer; background:#fff; user-select:none;}
+.chip.on{background:var(--ink); color:#fff;}
+.btn{display:block; width:100%; background:var(--green); color:#fff; font-family:var(--disp); font-size:1.05rem; letter-spacing:1px; padding:.9rem; border:3px solid var(--ink); cursor:pointer; margin-top:1.2rem; text-transform:uppercase;}
+.btn:hover{background:#006030;}
+.btn:disabled{opacity:.55; cursor:wait;}
+
+/* Results */
+#results{max-width:760px; margin:1.5rem auto; padding:0 1rem;}
+.route-sign{background:var(--blue); color:#fff; border:3px solid var(--ink); padding:1rem 1.2rem; margin-bottom:1rem; display:flex; align-items:center; gap:1rem;}
+.route-sign.green{background:var(--ok);}
+.route-sign.amber{background:#B87A12;}
+.route-sign.red{background:var(--red);}
+.route-sign.grey{background:var(--grey);}
+/* Vertical traffic-light stack — motoring motif */
+.tl-stack{display:flex; flex-direction:column; gap:5px; background:var(--ink); padding:8px 6px; flex-shrink:0;}
+.tl-dot{width:22px; height:22px; border-radius:50%; background:#3a3d38;}
+.tl-dot.lit-red{background:#ff4b33; box-shadow:0 0 8px #ff4b33;}
+.tl-dot.lit-amber{background:#ffb52e; box-shadow:0 0 8px #ffb52e;}
+.tl-dot.lit-green{background:#3ddc74; box-shadow:0 0 8px #3ddc74;}
+.route-sign h3{font-family:var(--disp); font-size:1.05rem; margin-bottom:.15rem; text-transform:uppercase; letter-spacing:.5px;}
+.route-sign p{font-size:.9rem; line-height:1.45;}
+
+.card{background:#fff; border:3px solid var(--ink); padding:1.15rem 1.2rem; margin-bottom:1rem;}
+.card.toppick{border-width:4px; position:relative;}
+.card.toppick::before{content:'TOP PICK'; position:absolute; top:-15px; left:12px; background:var(--green); color:#fff; font-family:var(--disp); font-size:.7rem; letter-spacing:1.5px; padding:.2rem .7rem; border:2px solid var(--ink);}
+.card h3{font-family:var(--disp); font-size:1.1rem; margin-bottom:.25rem; line-height:1.25;}
+.card .meta{font-weight:600; text-transform:uppercase; letter-spacing:1.5px; font-size:.72rem; color:#5a5e57; margin-bottom:.55rem;}
+.tag{display:inline-block; font-weight:700; font-size:.72rem; text-transform:uppercase; letter-spacing:1px; padding:.25rem .65rem; border:2px solid var(--ink); margin:.2rem .25rem .2rem 0; background:#fff;}
+.tag.yes{background:#E4F0E6; border-color:var(--ok); color:#1d5c33;}
+.tag.maybe{background:#FBF3DF; border-color:var(--amber); color:#7a5a10;}
+.tag.no{background:#FBE7E3; border-color:var(--red); color:#a02c1e;}
+.card p{font-size:.93rem; margin:.35rem 0;}
+.card ul{margin:.5rem 0 .5rem 1.2rem; font-size:.92rem;}
+.card a{color:var(--blue); font-weight:700;}
+.sec-h{font-family:var(--disp); font-size:1rem; text-transform:uppercase; letter-spacing:1px; margin:1.4rem 0 .2rem; padding-bottom:.3rem; border-bottom:3px solid var(--ink);}
+.loading{text-align:center; padding:2.5rem; font-weight:600; letter-spacing:2px; text-transform:uppercase; font-size:.85rem; color:#5a5e57;}
+footer{max-width:760px; margin:0 auto; padding:2rem 1rem 3rem; font-size:.82rem; color:#5a5e57; border-top:3px solid var(--ink);}
+footer a{color:var(--blue); font-weight:600;}
+.dir-arrow{display:inline-block; font-weight:700; margin-right:.4rem;}
 </style>
 </head>
 <body>
 
-<div class="hero">
-  <div class="wordmark">ParkSafe</div>
-  <h1>Find secure parking, know the risk</h1>
-  <p>UK &amp; Europe &middot; Vehicle theft traffic lights</p>
+<div class="mast">
+  <div class="mast-inner">
+    <div class="p-sign">P</div>
+    <div>
+      <h1>PARKSAFE</h1>
+      <div class="sub">Secure parking finder &middot; UK &amp; Europe</div>
+    </div>
+  </div>
 </div>
 
 <div class="search">
   <label for="addr">Street address</label>
-  <input type="text" id="addr" placeholder="e.g. 10 Downing Street, London" autocomplete="off">
+  <input type="text" id="addr" placeholder="e.g. Via Roma 1, Milano" autocomplete="off">
   <label>Vehicle type</label>
   <div id="vtype">
     <span class="chip on" data-v="car">Car</span>
-    <span class="chip" data-v="classic">Classic car</span>
+    <span class="chip" data-v="classic">Classic</span>
     <span class="chip" data-v="motorcycle">Motorcycle</span>
-    <span class="chip" data-v="motorhome">Motorhome / Campervan</span>
+    <span class="chip" data-v="motorhome">Motorhome</span>
     <span class="chip" data-v="van">Van</span>
   </div>
-  <button class="btn" id="go">Find secure parking</button>
+  <button class="btn" id="go">Find secure parking &rarr;</button>
 </div>
 
 <div id="results"></div>
 
 <footer>
-  Theft data: <a href="https://data.police.uk/">police.uk</a> (UK, street-level vehicle crime) &middot;
+  <b>PARKSAFE</b> &middot; Theft data: <a href="https://data.police.uk/">police.uk</a> (UK, street-level vehicle crime) &middot;
   Parking data: <a href="https://www.openstreetmap.org/">OpenStreetMap</a> &middot;
   <a href="mailto:ian.cleary@gmail.com?subject=Bug%20report%3A%20ParkSafe">Report a bug 🐞</a>
 </footer>
@@ -261,33 +281,36 @@ function haversine(lat1, lon1, lat2, lon2) {
 }
 
 function renderResults(addr, risk, parking, vtype, country) {
-  const vlabel = {car:'Car', classic:'Classic car', motorcycle:'Motorcycle', motorhome:'Motorhome / Campervan', van:'Van'}[vtype] || vtype;
-  let html = `<div class="traffic ${risk.level}"><div class="light ${risk.level}"></div><div><h3>${risk.title}</h3><p>${risk.detail}</p></div></div>`;
+  const vlabel = {car:'Car', classic:'Classic', motorcycle:'Motorcycle', motorhome:'Motorhome', van:'Van'}[vtype] || vtype;
+  const lit = risk.level === 'red' ? 'lit-red' : risk.level === 'amber' ? 'lit-amber' : risk.level === 'green' ? 'lit-green' : '';
+  const dots = ['red','amber','green'].map(c => `<div class="tl-dot ${risk.level===c?lit:''}"></div>`).join('');
+  let html = `<div class="route-sign ${risk.level}"><div class="tl-stack">${dots}</div><div><h3>${risk.title}</h3><p>${risk.detail}</p></div></div>`;
 
-  html += `<div class="card"><h3>📍 ${addr}</h3><p class="meta">Parking for: ${vlabel}</p></div>`;
+  html += `<div class="card"><h3><span class="dir-arrow">&rarr;</span>${addr}</h3><p class="meta">Vehicle: ${vlabel}</p></div>`;
 
   if (!parking.length) {
-    html += `<div class="card"><h3>No mapped parking found within 2km</h3><p>OpenStreetMap doesn't list parking here yet. Try these instead:</p><ul style="margin:.5rem 0 .5rem 1.2rem; font-size:.92rem;"><li><a href="https://www.parkopedia.com/">Parkopedia</a> — bookable spaces, often with CCTV ratings</li><li><a href="https://www.justpark.com/">JustPark</a> — driveways &amp; private spaces nearby</li><li><a href="https://en.parkindigo.com/">Indigo</a> / <a href="https://www.q-park.co.uk/">Q-Park</a> — multi-storeys with barriers &amp; CCTV</li></ul></div>`;
+    html += `<div class="card"><h3>No mapped parking within 2 km</h3><p>OpenStreetMap lists nothing here yet. Check reviews directly:</p><ul><li><a href="https://www.parkopedia.com/">Parkopedia</a> — ratings &amp; bookable spaces</li><li><a href="https://www.justpark.com/">JustPark</a> — reviewed private spaces</li><li><a href="https://en.parkindigo.com/">Indigo</a> / <a href="https://www.q-park.co.uk/">Q-Park</a> — operator sites with reviews</li></ul></div>`;
   } else {
-    // Top pick: highest security score within 1.5km, else closest secure
     const topPick = parking[0];
-    const confLabel = topPick.score >= 5 ? 'High confidence' : topPick.score >= 2 ? 'Reasonable confidence' : 'Basic — verify on arrival';
-    const confClass = topPick.score >= 5 ? 'yes' : topPick.score >= 2 ? 'maybe' : 'no';
+    const conf = topPick.score >= 5 ? ['yes','High confidence'] : topPick.score >= 2 ? ['maybe','Reasonable confidence'] : ['no','Basic — verify on arrival'];
+    html += `<div class="card toppick"><h3>${topPick.name}</h3><p class="meta">${topPick.dist ? (topPick.dist/1000).toFixed(1) + ' km' : ''} &middot; <span class="tag ${conf[0]}">${conf[1]}</span></p><div>${topPick.secure.map(s => `<span class="tag yes">${s}</span>`).join('') || '<span class="tag maybe">Security unmapped</span>'}</div>${parkDetails(topPick, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${topPick.lat},${topPick.lon}" target="_blank">Directions &rarr;</a> &middot; ${reviewLink(topPick)}</p></div>`;
 
-    html += `<div class="card" style="border:2px solid var(--pine);"><h3>⭐ Top pick: ${topPick.name}</h3><p class="meta">${topPick.dist ? (topPick.dist/1000).toFixed(1) + ' km away' : ''} &middot; <span class="secure ${confClass}">${confLabel}</span></p><div>${topPick.secure.map(s => `<span class="secure yes">${s}</span>`).join('') || '<span class="secure maybe">No security details mapped — check on arrival</span>'}</div>${parkDetails(topPick, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${topPick.lat},${topPick.lon}" target="_blank">Get directions →</a></p></div>`;
-
-    html += `<h3 style="font-family:var(--slab); margin:1.2rem 0 .5rem;">Other options nearby</h3>`;
-    parking.slice(1).forEach(p => {
-      const cl = p.score >= 5 ? 'yes' : p.score >= 2 ? 'maybe' : 'no';
-      const clt = p.score >= 5 ? 'High' : p.score >= 2 ? 'Reasonable' : 'Basic';
-      html += `<div class="card"><h3>${p.name}</h3><p class="meta">${p.dist ? (p.dist/1000).toFixed(1) + ' km' : ''} &middot; <span class="secure ${cl}">${clt} confidence</span></p><div>${p.secure.map(s => `<span class="secure yes">${s}</span>`).join('') || '<span class="secure maybe">Security unknown</span>'}</div>${parkDetails(p, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank">Get directions →</a></p></div>`;
-    });
+    if (parking.length > 1) {
+      html += `<div class="sec-h">Other options</div>`;
+      parking.slice(1).forEach(p => {
+        const c = p.score >= 5 ? ['yes','High'] : p.score >= 2 ? ['maybe','Reasonable'] : ['no','Basic'];
+        html += `<div class="card"><h3>${p.name}</h3><p class="meta">${p.dist ? (p.dist/1000).toFixed(1) + ' km' : ''} &middot; <span class="tag ${c[0]}">${c[1]}</span></p><div>${p.secure.map(s => `<span class="tag yes">${s}</span>`).join('') || '<span class="tag maybe">Security unknown</span>'}</div>${parkDetails(p, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank">Directions &rarr;</a> &middot; ${reviewLink(p)}</p></div>`;
+      });
+    }
   }
 
-  // Confidence checklist tailored to vehicle + risk
   html += confidenceChecklist(vtype, risk.level);
-
   $('#results').innerHTML = html;
+}
+
+function reviewLink(p) {
+  const q = encodeURIComponent((p.name || 'parking') + ' parking');
+  return `<a href="https://www.google.com/maps/search/?api=1&query=${q}+${p.lat},${p.lon}" target="_blank">&#9733; Reviews</a>`;
 }
 
 function parkDetails(p, vtype) {
@@ -301,17 +324,17 @@ function parkDetails(p, vtype) {
 
 function confidenceChecklist(vtype, riskLevel) {
   const items = {
-    car: ['Lock and take valuables with you', 'Park under a light or camera where possible', 'Note the bay number / level for later'],
-    classic: ['Use a steering-wheel lock — visible deterrent matters', 'Prefer supervised or CCTV-monitored sites only', 'Consider a tracker if leaving overnight', 'Photograph the car\'s condition on arrival'],
-    motorcycle: ['Chain to a ground anchor or immovable object', 'Disc lock on front wheel as minimum', 'Cover the bike — out of sight helps', 'Park near CCTV or staffed entrances'],
-    motorhome: ['Check height barrier before entering', 'Confirm overnight stays are allowed', 'Level the van and lock all external hatches', 'Don\'t leave awnings or valuables outside'],
-    van: ['Back into the bay against a wall if possible', 'Deadlock doors; consider a slam-lock', 'Remove tools or lock them in a bolted box', 'Park in view of cameras, not dark corners']
+    car: ['Lock up, take valuables with you', 'Park under a light or camera', 'Note the bay number / level'],
+    classic: ['Steering-wheel lock on — visible deterrent', 'Supervised or CCTV-monitored sites only', 'Tracker armed if leaving overnight', 'Photograph condition on arrival'],
+    motorcycle: ['Chain to a ground anchor or fixed object', 'Disc lock as minimum', 'Cover it — out of sight helps', 'Near CCTV or staffed entrances'],
+    motorhome: ['Check height barrier before entering', 'Confirm overnight stays allowed', 'Lock all external hatches', 'Nothing valuable left outside'],
+    van: ['Back against a wall where possible', 'Deadlocks on; slam-locks considered', 'Tools in a bolted box or removed', 'In view of cameras, not dark corners']
   };
   const list = (items[vtype] || items.car).map(i => `<li>${i}</li>`).join('');
   const riskNote = riskLevel === 'red'
-    ? '<p style="margin-top:.5rem;"><b>This is a high-theft area.</b> A visible deterrent (lock, chain, tracker) is strongly advised even in supervised parking.</p>'
-    : riskLevel === 'amber' ? '<p style="margin-top:.5rem;">Moderate-theft area — the basics above go a long way here.</p>' : '';
-  return `<div class="card"><h3>✅ Park-with-confidence checklist</h3><ul style="margin:.5rem 0 .5rem 1.2rem; font-size:.92rem;">${list}</ul>${riskNote}</div>`;
+    ? '<p style="margin-top:.5rem;"><b>High-theft area.</b> A visible deterrent is strongly advised even in supervised parking.</p>'
+    : riskLevel === 'amber' ? '<p style="margin-top:.5rem;">Moderate-theft area — the basics above go a long way.</p>' : '';
+  return `<div class="sec-h">Park-with-confidence checklist</div><div class="card"><ul>${list}</ul>${riskNote}</div>`;
 }
 </script>
 </body>
