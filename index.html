@@ -67,6 +67,8 @@ footer{max-width:760px; margin:0 auto; padding:2rem 1rem 3rem; font-size:.82rem;
 footer a{color:var(--blue); font-weight:600;}
 .dir-arrow{display:inline-block; font-weight:700; margin-right:.4rem;}
 </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
@@ -82,7 +84,10 @@ footer a{color:var(--blue); font-weight:600;}
 
 <div class="search">
   <label for="addr">Street address</label>
+  <div style="position:relative;">
   <input type="text" id="addr" placeholder="e.g. Via Roma 1, Milano" autocomplete="off">
+  <div id="suggest" style="display:none; position:absolute; top:100%; left:0; right:0; background:#fffdf7; border:2px solid var(--ink); border-top:none; z-index:50; max-height:220px; overflow-y:auto;"></div>
+  </div>
   <button type="button" id="locBtn" class="chip" style="margin-top:.5rem;">&#9678; Detect my location</button>
   <label>Vehicle type</label>
   <div id="vtype">
@@ -139,6 +144,32 @@ $('#locBtn').onclick = () => {
     alert('Could not get your location. Please enter an address manually.');
   }, {timeout: 10000});
 };
+
+// Address autocomplete (debounced, via worker)
+let acTimer = null;
+$('#addr').addEventListener('input', () => {
+  clearTimeout(acTimer);
+  const q = $('#addr').value.trim();
+  const box = $('#suggest');
+  if (q.length < 3) { box.style.display = 'none'; return; }
+  acTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`${PLACES_WORKER}/api/autocomplete?input=${encodeURIComponent(q)}`).then(r => r.json());
+      const sug = r.suggestions || [];
+      if (!sug.length) { box.style.display = 'none'; return; }
+      box.innerHTML = sug.map((s, i) => `<div data-i="${i}" style="padding:.5rem .75rem; cursor:pointer; border-bottom:1px solid #e8e0cf; font-size:.9rem;">${s.text}</div>`).join('');
+      box.style.display = 'block';
+      box.querySelectorAll('div').forEach(d => {
+        d.onclick = () => { $('#addr').value = sug[+d.dataset.i].text; box.style.display = 'none'; };
+        d.onmouseenter = () => d.style.background = '#f5f1e8';
+        d.onmouseleave = () => d.style.background = '';
+      });
+    } catch(e) { /* silent */ }
+  }, 350);
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#suggest') && e.target.id !== 'addr') $('#suggest').style.display = 'none';
+});
 
 async function geocodeTolerant(addr) {
   const nq = async (q, cc) => {
@@ -404,6 +435,8 @@ async function fetchGoogleParking(lat, lon) {
   return wRes.results.map(p => ({
     name: p.name,
     address: p.address || null,
+    photo: p.photo ? `${PLACES_WORKER}/api/photo?name=${encodeURIComponent(p.photo)}` : null,
+    reviewSnippets: p.reviewSnippets || [],
     dist: Math.round(haversine(lat, lon, p.lat, p.lng) * 1000),
     secure: inferSecurity(p.name, p.types),
     score: scoreFromGoogle(p),
@@ -511,6 +544,16 @@ function distLabel(m) {
   return `${km} km &middot; ~${walkMin} min walk`;
 }
 
+function photoHtml(p) {
+  if (!p.photo) return '';
+  return `<img src="${p.photo}" alt="${(p.name||'Car park').replace(/"/g,'')}" loading="lazy" style="width:100%; height:140px; object-fit:cover; border:2px solid var(--ink); margin-bottom:.5rem;" onerror="this.style.display='none'">`;
+}
+function snippetHtml(p) {
+  if (!p.reviewSnippets || !p.reviewSnippets.length) return '';
+  return `<div style="margin:.5rem 0; padding:.5rem; background:#f5f1e8; border-left:3px solid var(--green); font-size:.82rem;">` +
+    p.reviewSnippets.map(s => `<p style="margin:.25rem 0;"><i>"${s.text}${s.text.length >= 180 ? '…' : ''}"</i><br><span style="opacity:.7;">— ${s.author}${s.rating ? ` ★${s.rating}` : ''}</span></p>`).join('') + `</div>`;
+}
+
 function renderResults(addr, risk, parking, hotels, watchout, vtype, country) {
   const vlabel = {car:'Car', classic:'Classic', motorcycle:'Motorcycle', motorhome:'Motorhome', van:'Van'}[vtype] || vtype;
   const lit = risk.level === 'red' ? 'lit-red' : risk.level === 'amber' ? 'lit-amber' : risk.level === 'green' ? 'lit-green' : '';
@@ -519,18 +562,23 @@ function renderResults(addr, risk, parking, hotels, watchout, vtype, country) {
 
   html += `<div class="card"><h3><span class="dir-arrow">&rarr;</span>${addr}</h3><p class="meta">Vehicle: ${vlabel}</p></div>`;
 
+  // Map with markers
+  if (parking.length) {
+    html += `<div class="card" style="padding:0; overflow:hidden;"><div id="pmap" style="height:280px; border:2px solid var(--ink);"></div></div>`;
+  }
+
   if (!parking.length) {
     html += `<div class="card"><h3>No parking found within 3 km</h3><p>Neither Google nor OpenStreetMap lists parking here yet. Check directly:</p><ul><li><a href="https://www.parkopedia.com/parking/${encodeURIComponent(addr.split(',')[0])}/">Parkopedia near ${addr.split(',')[0]}</a> — ratings &amp; bookable spaces</li><li><a href="https://www.justpark.com/">JustPark</a> — reviewed private spaces nearby</li><li><a href="https://www.q-park.co.uk/en-gb/cities/manchester/">Q-Park Manchester</a> / <a href="https://www.ncp.co.uk/">NCP</a> — operator sites with CCTV &amp; barriers</li></ul></div>`;
   } else {
     const topPick = parking[0];
     const conf = topPick.score >= 5 ? ['yes','High confidence'] : topPick.score >= 2 ? ['maybe','Reasonable confidence'] : ['no','Basic — verify on arrival'];
-    html += `<div class="card toppick"><h3>${topPick.name}</h3>${topPick.address ? `<p class="meta" style="margin-top:-.3rem;">${topPick.address}</p>` : ''}<p class="meta"><b>${distLabel(topPick.dist)}</b> &middot; <span class="tag ${conf[0]}">${conf[1]}</span></p><div>${topPick.secure.map(s => `<span class="tag yes">${s}</span>`).join('') || '<span class="tag maybe">Security unmapped</span>'}</div>${parkDetails(topPick, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${topPick.lat},${topPick.lon}" target="_blank">Directions &rarr;</a> &middot; ${reviewLink(topPick)}</p></div>`;
+    html += `<div class="card toppick">${photoHtml(topPick)}<h3>${topPick.name}</h3>${topPick.address ? `<p class="meta" style="margin-top:-.3rem;">${topPick.address}</p>` : ''}<p class="meta"><b>${distLabel(topPick.dist)}</b> &middot; <span class="tag ${conf[0]}">${conf[1]}</span></p><div>${topPick.secure.map(s => `<span class="tag yes">${s}</span>`).join('') || '<span class="tag maybe">Security unmapped</span>'}</div>${snippetHtml(topPick)}${parkDetails(topPick, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${topPick.lat},${topPick.lon}" target="_blank">Directions &rarr;</a> &middot; ${reviewLink(topPick)}</p></div>`;
 
     if (parking.length > 1) {
       html += `<div class="sec-h">Other options <span style="font-weight:normal; font-size:.8rem;">(nearest first)</span></div>`;
       [...parking.slice(1)].sort((a,b) => (a.dist||99999) - (b.dist||99999)).forEach(p => {
         const c = p.score >= 5 ? ['yes','High'] : p.score >= 2 ? ['maybe','Reasonable'] : ['no','Basic'];
-        html += `<div class="card"><h3>${p.name}</h3>${p.address ? `<p class="meta" style="margin-top:-.3rem;">${p.address}</p>` : ''}<p class="meta"><b>${distLabel(p.dist)}</b> &middot; <span class="tag ${c[0]}">${c[1]}</span></p><div>${p.secure.map(s => `<span class="tag yes">${s}</span>`).join('') || '<span class="tag maybe">Security unknown</span>'}</div>${parkDetails(p, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank">Directions &rarr;</a> &middot; ${reviewLink(p)}</p></div>`;
+        html += `<div class="card">${photoHtml(p)}<h3>${p.name}</h3>${p.address ? `<p class="meta" style="margin-top:-.3rem;">${p.address}</p>` : ''}<p class="meta"><b>${distLabel(p.dist)}</b> &middot; <span class="tag ${c[0]}">${c[1]}</span></p><div>${p.secure.map(s => `<span class="tag yes">${s}</span>`).join('') || '<span class="tag maybe">Security unknown</span>'}</div>${snippetHtml(p)}${parkDetails(p, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank">Directions &rarr;</a> &middot; ${reviewLink(p)}</p></div>`;
       });
     }
   }
@@ -545,6 +593,26 @@ function renderResults(addr, risk, parking, hotels, watchout, vtype, country) {
 
   html += confidenceChecklist(vtype, risk.level);
   $('#results').innerHTML = html;
+
+  // Init Leaflet map
+  const mapEl = document.getElementById('pmap');
+  if (mapEl && parking.length && window.L) {
+    const pts = parking.filter(p => p.lat && p.lon);
+    if (pts.length) {
+      const map = L.map('pmap');
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
+      const bounds = [];
+      pts.forEach((p, i) => {
+        const color = i === 0 ? 'green' : 'blue';
+        const marker = L.marker([p.lat, p.lon], {
+          icon: L.divIcon({className: '', html: `<div style="background:${color === 'green' ? '#1a7a3a' : '#1a3a7a'}; color:#fff; border:2px solid #fff; border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:13px; box-shadow:0 1px 4px rgba(0,0,0,.4);">P</div>`, iconSize: [28, 28], iconAnchor: [14, 14]})
+        }).addTo(map);
+        marker.bindPopup(`<b>${p.name}</b><br>${p.address || ''}<br>${p.rating ? `★ ${p.rating} (${p.reviews} reviews)<br>` : ''}${(p.dist/1000).toFixed(1)} km away`);
+        bounds.push([p.lat, p.lon]);
+      });
+      map.fitBounds(bounds, {padding: [30, 30]});
+    }
+  }
 }
 
 function reviewLink(p) {
