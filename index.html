@@ -335,7 +335,60 @@ async function findHotels(lat, lon) {
   } catch(e) { return []; }
 }
 
+const PLACES_WORKER = 'https://parksafe-places.wildskies-votes.workers.dev';
+
+// Google Places result → security tags (operator reputation)
+function operatorFromName(name) {
+  const n = name.toLowerCase();
+  if (n.includes('q-park') || n.includes('qpark')) return 'Q-Park';
+  if (n.includes('ncp')) return 'NCP';
+  if (n.includes('indigo')) return 'Indigo';
+  if (n.includes('apcoa')) return 'APCOA';
+  if (n.includes('britannia')) return 'Britannia';
+  return null;
+}
+function inferSecurity(name, types) {
+  const secure = [];
+  const op = operatorFromName(name);
+  if (op) { secure.push(op + ' operated'); }
+  const n = name.toLowerCase();
+  if (/multi.?storey|underground|car park|garage/.test(n)) secure.push('Enclosed');
+  if (/cctv|secure|guarded/.test(n)) secure.push('CCTV');
+  return secure;
+}
+function scoreFromGoogle(p) {
+  let s = 1;
+  const op = operatorFromName(p.name);
+  if (op) s += 3; // known operator = CCTV, barriers, lighting
+  if (p.rating && p.rating >= 4) s += 1;
+  if (p.reviews > 50) s += 1;
+  return s;
+}
+
 async function findParking(lat, lon, vtype) {
+  // Try Google Places via worker first (real ratings, reviews, hours) — falls back to OSM
+  try {
+    const wRes = await fetch(`${PLACES_WORKER}/api/places?lat=${lat}&lng=${lon}`, {signal: AbortSignal.timeout(8000)}).then(r => r.json());
+    if (wRes.results && wRes.results.length) {
+      return wRes.results.map(p => ({
+        name: p.name,
+        dist: Math.round(haversine(lat, lon, p.lat, p.lng) * 1000),
+        secure: inferSecurity(p.name, p.types),
+        score: scoreFromGoogle(p),
+        opening: p.open_now === true ? 'Open now' : p.open_now === false ? 'Closed now' : null,
+        maxheight: null,
+        capacity: null,
+        operator: operatorFromName(p.name),
+        fee: null,
+        lat: p.lat, lon: p.lng,
+        rating: p.rating,
+        reviews: p.reviews,
+        place_id: p.place_id,
+        source: 'google'
+      })).sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999))).slice(0, 10);
+    }
+  } catch(e) { /* fall through to OSM */ }
+
   // Overpass query — catch nodes, ways, relations, and building=parking (multi-storeys)
   let filter, bfilter;
   if (vtype === 'motorcycle') {
@@ -479,7 +532,11 @@ function renderResults(addr, risk, parking, hotels, watchout, vtype, country) {
 
 function reviewLink(p) {
   const q = encodeURIComponent((p.name || 'parking') + ' parking');
-  return `<a href="https://www.google.com/maps/search/?api=1&query=${q}+${p.lat},${p.lon}" target="_blank">&#9733; Reviews</a>`;
+  const url = `https://www.google.com/maps/search/?api=1&query=${q}+${p.lat},${p.lon}`;
+  if (p.rating) {
+    return `<a href="${url}" target="_blank">&#9733; ${p.rating.toFixed(1)} (${p.reviews || 0} reviews)</a>`;
+  }
+  return `<a href="${url}" target="_blank">&#9733; Reviews</a>`;
 }
 
 function parkDetails(p, vtype) {
