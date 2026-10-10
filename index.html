@@ -83,6 +83,7 @@ footer a{color:var(--blue); font-weight:600;}
 <div class="search">
   <label for="addr">Street address</label>
   <input type="text" id="addr" placeholder="e.g. Via Roma 1, Milano" autocomplete="off">
+  <button type="button" id="locBtn" class="chip" style="margin-top:.5rem;">&#9678; Detect my location</button>
   <label>Vehicle type</label>
   <div id="vtype">
     <span class="chip on" data-v="car">Car</span>
@@ -114,6 +115,31 @@ document.querySelectorAll('#vtype .chip').forEach(c => {
   };
 });
 
+$('#locBtn').onclick = () => {
+  if (!navigator.geolocation) { alert('Geolocation is not supported by this browser.'); return; }
+  const b = $('#locBtn');
+  b.textContent = 'Locating…';
+  b.style.pointerEvents = 'none';
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const {latitude, longitude} = pos.coords;
+    try {
+      const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+        headers: {'Accept': 'application/json'}
+      }).then(r => r.json());
+      $('#addr').value = rev.display_name || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+    } catch(e) {
+      $('#addr').value = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+    }
+    b.innerHTML = '&#9678; Detect my location';
+    b.style.pointerEvents = '';
+    $('#go').click();
+  }, (err) => {
+    b.innerHTML = '&#9678; Detect my location';
+    b.style.pointerEvents = '';
+    alert('Could not get your location. Please enter an address manually.');
+  }, {timeout: 10000});
+};
+
 $('#go').onclick = async () => {
   const addr = $('#addr').value.trim();
   if (!addr) { alert('Enter a street address first.'); return; }
@@ -123,14 +149,25 @@ $('#go').onclick = async () => {
   $('#results').innerHTML = '<div class="loading">Locating address…</div>';
 
   try {
-    // 1. Geocode via Nominatim
-    const geo = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(addr)}`, {
-      headers: {'Accept': 'application/json'}
-    }).then(r => r.json());
-
-    if (!geo.length) throw new Error('Address not found. Try a more specific address.');
-    const {lat, lon, display_name} = geo[0];
-    const country = geo[0].address?.country_code?.toUpperCase() || '';
+    // 1. Geocode — or use raw coordinates if that's what's entered
+    let lat, lon, display_name, country;
+    const coordMatch = addr.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+    if (coordMatch) {
+      lat = parseFloat(coordMatch[1]); lon = parseFloat(coordMatch[2]);
+      const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`, {
+        headers: {'Accept': 'application/json'}
+      }).then(r => r.json()).catch(() => null);
+      display_name = rev?.display_name || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+      country = rev?.address?.country_code?.toUpperCase() || '';
+    } else {
+      const geo = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(addr)}`, {
+        headers: {'Accept': 'application/json'}
+      }).then(r => r.json());
+      if (!geo.length) throw new Error('Address not found. Try a more specific address.');
+      ({lat, lon, display_name} = geo[0]);
+      lat = parseFloat(lat); lon = parseFloat(lon);
+      country = geo[0].address?.country_code?.toUpperCase() || '';
+    }
 
     $('#results').innerHTML = '<div class="loading">Checking theft risk &amp; nearby parking…</div>';
 
