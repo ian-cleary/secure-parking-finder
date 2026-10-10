@@ -336,11 +336,17 @@ async function findHotels(lat, lon) {
 }
 
 async function findParking(lat, lon, vtype) {
-  // Overpass query for parking near location
-  let filter = '[amenity=parking]';
-  if (vtype === 'motorcycle') filter = '[amenity=motorcycle_parking]';
+  // Overpass query — catch nodes, ways, relations, and building=parking (multi-storeys)
+  let filter, bfilter;
+  if (vtype === 'motorcycle') {
+    filter = '[amenity=motorcycle_parking]';
+    bfilter = '[amenity=motorcycle_parking]';
+  } else {
+    filter = '[amenity=parking]';
+    bfilter = '[building=parking]';
+  }
 
-  const query = `[out:json][timeout:25];(node(around:2000,${lat},${lon})${filter};way(around:2000,${lat},${lon})${filter};);out center 30;`;
+  const query = `[out:json][timeout:25];(node(around:3000,${lat},${lon})${filter};way(around:3000,${lat},${lon})${filter};relation(around:3000,${lat},${lon})${filter};way(around:3000,${lat},${lon})${bfilter};);out center 40;`;
 
   try {
     const data = await fetch('https://overpass-api.de/api/interpreter', {
@@ -444,7 +450,7 @@ function renderResults(addr, risk, parking, hotels, watchout, vtype, country) {
   html += `<div class="card"><h3><span class="dir-arrow">&rarr;</span>${addr}</h3><p class="meta">Vehicle: ${vlabel}</p></div>`;
 
   if (!parking.length) {
-    html += `<div class="card"><h3>No mapped parking within 2 km</h3><p>OpenStreetMap lists nothing here yet. Check reviews directly:</p><ul><li><a href="https://www.parkopedia.com/">Parkopedia</a> — ratings &amp; bookable spaces</li><li><a href="https://www.justpark.com/">JustPark</a> — reviewed private spaces</li><li><a href="https://en.parkindigo.com/">Indigo</a> / <a href="https://www.q-park.co.uk/">Q-Park</a> — operator sites with reviews</li></ul></div>`;
+    html += `<div class="card"><h3>No mapped parking within 3 km</h3><p>OpenStreetMap lists nothing here yet — but city-centre multi-storeys (Q-Park, NCP, Indigo) often aren't fully mapped. Check directly:</p><ul><li><a href="https://www.parkopedia.com/parking/${encodeURIComponent(addr.split(',')[0])}/">Parkopedia near ${addr.split(',')[0]}</a> — ratings &amp; bookable spaces</li><li><a href="https://www.justpark.com/">JustPark</a> — reviewed private spaces nearby</li><li><a href="https://www.q-park.co.uk/en-gb/cities/manchester/">Q-Park Manchester</a> / <a href="https://www.ncp.co.uk/">NCP</a> — operator sites with CCTV &amp; barriers</li></ul></div>`;
   } else {
     const topPick = parking[0];
     const conf = topPick.score >= 5 ? ['yes','High confidence'] : topPick.score >= 2 ? ['maybe','Reasonable confidence'] : ['no','Basic — verify on arrival'];
