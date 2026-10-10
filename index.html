@@ -140,6 +140,37 @@ $('#locBtn').onclick = () => {
   }, {timeout: 10000});
 };
 
+async function geocodeTolerant(addr) {
+  const nq = async (q, cc) => {
+    let url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(q)}`;
+    if (cc) url += `&countrycodes=${cc}`;
+    const r = await fetch(url, {headers: {'Accept': 'application/json'}}).then(r => r.json());
+    return r.length ? r[0] : null;
+  };
+  const norm = (g) => ({lat: g.lat, lon: g.lon, display_name: g.display_name, country_code: g.address?.country_code?.toUpperCase() || ''});
+
+  // 1. Try as-is
+  let g = await nq(addr);
+  if (g) return norm(g);
+
+  // 2. UK postcode? (full like "DN21 4JT" or partial like "DN21")
+  const pc = addr.trim().toUpperCase().match(/^([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})?$/);
+  if (pc) {
+    g = await nq(pc[0], 'gb');
+    if (g) return norm(g);
+  }
+
+  // 3. Try with ", UK" appended (helps villages/hamlets)
+  g = await nq(addr + ', UK', 'gb');
+  if (g) return norm(g);
+
+  // 4. Try with ", Europe" for continental addresses
+  g = await nq(addr + ', Europe');
+  if (g) return norm(g);
+
+  throw new Error(`Couldn't find "${addr}". Try a full postcode, or add the town/city.`);
+}
+
 $('#go').onclick = async () => {
   const addr = $('#addr').value.trim();
   if (!addr) { alert('Enter a street address first.'); return; }
@@ -160,13 +191,10 @@ $('#go').onclick = async () => {
       display_name = rev?.display_name || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
       country = rev?.address?.country_code?.toUpperCase() || '';
     } else {
-      const geo = await fetch(`https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(addr)}`, {
-        headers: {'Accept': 'application/json'}
-      }).then(r => r.json());
-      if (!geo.length) throw new Error('Address not found. Try a more specific address.');
-      ({lat, lon, display_name} = geo[0]);
+      const geo = await geocodeTolerant(addr);
+      ({lat, lon, display_name} = geo);
       lat = parseFloat(lat); lon = parseFloat(lon);
-      country = geo[0].address?.country_code?.toUpperCase() || '';
+      country = geo.country_code;
     }
 
     $('#results').innerHTML = '<div class="loading">Checking theft risk &amp; nearby parking…</div>';
@@ -181,10 +209,17 @@ $('#go').onclick = async () => {
       risk = {level: 'grey', title: 'Theft data unavailable', detail: 'Vehicle-theft statistics are not available for this country yet. Exercise normal caution.'};
     }
 
-    // 3. Find parking via Overpass
-    const parking = await findParking(lat, lon, vehicleType);
+    // 3. Find parking + hotels via Overpass (in parallel)
+    const [parking, hotels] = await Promise.all([
+      findParking(lat, lon, vehicleType),
+      findHotels(lat, lon)
+    ]);
 
-    renderResults(display_name, risk, parking, vehicleType, country);
+    // 4. Street-crime watchout (UK: broader police.uk categories)
+    let watchout = null;
+    if (country === 'GB') watchout = await getStreetCrime(lat, lon);
+
+    renderResults(display_name, risk, parking, hotels, watchout, vehicleType, country);
 
   } catch (e) {
     $('#results').innerHTML = `<div class="card"><h3>Something went wrong</h3><p>${e.message}</p></div>`;
@@ -220,6 +255,22 @@ async function getUKRisk(lat, lon) {
   if (total <= 5) return {level: 'green', title: 'Low vehicle theft risk', detail: `${total} vehicle crimes reported nearby ${label}. This area looks safe — standard precautions are enough.`};
   if (total <= 20) return {level: 'amber', title: 'Moderate vehicle theft risk', detail: `${total} vehicle crimes reported nearby ${label}. Pick a supervised or CCTV-covered car park and don't leave valuables visible.`};
   return {level: 'red', title: 'High vehicle theft risk', detail: `${total} vehicle crimes reported nearby ${label}. Theft is rife here — use only supervised, barrier-controlled parking and consider a steering lock or tracker.`};
+}
+
+async function getStreetCrime(lat, lon) {
+  // Broader street-crime watchout: top non-vehicle crime categories nearby
+  try {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const crimes = await fetch(`https://data.police.uk/api/crimes-street/all-crime?lat=${lat}&lng=${lon}&date=${m}`).then(r => r.json());
+    const cats = {};
+    crimes.forEach(c => { if (c.category !== 'vehicle-crime') cats[c.category] = (cats[c.category] || 0) + 1; });
+    const top = Object.entries(cats).sort((a,b) => b[1] - a[1]).slice(0, 3);
+    if (!top.length || top[0][1] < 3) return null;
+    const label = s => s.replace(/-/g, ' ');
+    return `Also reported nearby in ${m}: ` + top.map(([c, n]) => `${n}× ${label(c)}`).join(', ') + '.';
+  } catch(e) { return null; }
 }
 
 async function getEurostatRisk(lat, lon, country) {
@@ -261,6 +312,27 @@ async function getEurostatRisk(lat, lon, country) {
   } catch(e) {}
 
   return {level: 'grey', title: 'Theft data unavailable', detail: 'Could not retrieve European theft statistics for this location. Exercise normal caution.'};
+}
+
+async function findHotels(lat, lon) {
+  // Hotels with parking — good overnight secure option
+  const query = `[out:json][timeout:25];(node(around:3000,${lat},${lon})[tourism=hotel];way(around:3000,${lat},${lon})[tourism=hotel];);out center 20;`;
+  try {
+    const data = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: 'data=' + encodeURIComponent(query),
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'}
+    }).then(r => r.json());
+    return (data.elements || []).map(el => {
+      const t = el.tags || {};
+      const plat = el.lat || el.center?.lat;
+      const plon = el.lon || el.center?.lon;
+      const dist = plat ? Math.round(haversine(lat, lon, plat, plon) * 1000) : null;
+      // Does it advertise parking?
+      const hasParking = t.parking || t['parking:lane'] || /park/i.test(t.description || '');
+      return {name: t.name || 'Hotel', dist, hasParking: !!hasParking, stars: t.stars || null, lat: plat, lon: plon};
+    }).filter(h => h.lat && h.name !== 'Hotel').sort((a,b) => (a.dist||99999) - (b.dist||99999)).slice(0, 5);
+  } catch(e) { return []; }
 }
 
 async function findParking(lat, lon, vtype) {
@@ -336,11 +408,11 @@ function haversine(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-function renderResults(addr, risk, parking, vtype, country) {
+function renderResults(addr, risk, parking, hotels, watchout, vtype, country) {
   const vlabel = {car:'Car', classic:'Classic', motorcycle:'Motorcycle', motorhome:'Motorhome', van:'Van'}[vtype] || vtype;
   const lit = risk.level === 'red' ? 'lit-red' : risk.level === 'amber' ? 'lit-amber' : risk.level === 'green' ? 'lit-green' : '';
   const dots = ['red','amber','green'].map(c => `<div class="tl-dot ${risk.level===c?lit:''}"></div>`).join('');
-  let html = `<div class="route-sign ${risk.level}"><div class="tl-stack">${dots}</div><div><h3>${risk.title}</h3><p>${risk.detail}</p></div></div>`;
+  let html = `<div class="route-sign ${risk.level}"><div class="tl-stack">${dots}</div><div><h3>${risk.title}</h3><p>${risk.detail}</p>${watchout ? `<p style="margin-top:.4rem; font-size:.82rem; opacity:.92;"><b>Street-crime watchout:</b> ${watchout}</p>` : ''}</div></div>`;
 
   html += `<div class="card"><h3><span class="dir-arrow">&rarr;</span>${addr}</h3><p class="meta">Vehicle: ${vlabel}</p></div>`;
 
@@ -358,6 +430,14 @@ function renderResults(addr, risk, parking, vtype, country) {
         html += `<div class="card"><h3>${p.name}</h3><p class="meta">${p.dist ? (p.dist/1000).toFixed(1) + ' km' : ''} &middot; <span class="tag ${c[0]}">${c[1]}</span></p><div>${p.secure.map(s => `<span class="tag yes">${s}</span>`).join('') || '<span class="tag maybe">Security unknown</span>'}</div>${parkDetails(p, vtype)}<p><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank">Directions &rarr;</a> &middot; ${reviewLink(p)}</p></div>`;
       });
     }
+  }
+
+  if (hotels && hotels.length) {
+    html += `<div class="sec-h">Hotels with parking nearby</div><p style="font-size:.85rem; margin-bottom:.6rem;">Overnight? A hotel with its own car park is often the most secure option.</p>`;
+    hotels.forEach(h => {
+      const q = encodeURIComponent(h.name);
+      html += `<div class="card"><h3>${h.name}</h3><p class="meta">${h.dist ? (h.dist/1000).toFixed(1) + ' km' : ''}${h.stars ? ` &middot; ${h.stars}★` : ''}${h.hasParking ? ' &middot; <span class="tag yes">Parking listed</span>' : ''}</p><p><a href="https://www.google.com/maps/dir/?api=1&destination=${h.lat},${h.lon}" target="_blank">Directions &rarr;</a> &middot; <a href="https://www.google.com/maps/search/?api=1&query=${q}+hotel+${h.lat},${h.lon}" target="_blank">&#9733; Reviews</a> &middot; <a href="https://www.booking.com/searchresults.html?ss=${q}" target="_blank">Check Booking.com &rarr;</a></p><p style="font-size:.82rem;">Call ahead to confirm secure/gated parking for a ${vlabel.toLowerCase()}.</p></div>`;
+    });
   }
 
   html += confidenceChecklist(vtype, risk.level);
