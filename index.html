@@ -538,7 +538,13 @@ async function fetchOSMParking(lat, lon, vtype) {
         source: 'osm',
         _access: t.access || ''
       };
-    }).filter(p => p.lat && p._access !== 'private' && p._access !== 'no').sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999)));
+    }).filter(p => {
+      if (!p.lat || p._access === 'private' || p._access === 'no') return false;
+      // Drop supermarkets and staff-only on OSM side too
+      const n = ((p.name || '') + ' ' + (p.operator || '')).toLowerCase();
+      if (/\btesco\b|\bmorrisons?\b|\basda\b|\bsainsbury|\baldi\b|\blidl\b|\bwaitrose\b|\bco-op\b|\biceland\b|\bstaff\b|\bprivate\b/i.test(n)) return false;
+      return true;
+    }).sort((a,b) => (b.score - a.score) || ((a.dist||99999) - (b.dist||99999)));
 
     return spots;
 
